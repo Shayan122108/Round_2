@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build output
+client/dist/
+
+# Runtime data
+server/uploads/*
+server/data/state.json
+
+# Logs / OS / editor
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Uncomment if this repo will be public — answer keys and private test sets are confidential
+# server/data/answer_keys/
+# server/data/datasets/variant_*/

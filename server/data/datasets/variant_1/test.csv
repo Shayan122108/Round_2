@@ -1,0 +1,13 @@
+id,material,supplier,coating,line_id,shift,batch_number,length_mm,width_mm,thickness_mm,weight_g,hardness_hv,surface_roughness_um,conductivity_iacs,magnetic_response_idx,ambient_temp_c,humidity_pct,vibration_rms,inspection_time_s
+P78165,Nylon-PA6,Sundara,None,L2,Evening,3696,47.29,42.59,7.04,15.79,22.6,3.482,0.1,0.246,26.5,,0.941,3.4
+P56216,Copper-C110,Alder & Co,Zinc,L1,Night,4000,30.17,18.96,4.87,29.38,57.4,1.784,49.6,0.752,22.9,50.2,0.461,3.95
+P71193,Al-7075,Norvik,Nickel,L3,Day,2502,11.38,12.91,7.81,4.14,97.3,1.8,34.4,1.479,24.8,52.5,0.988,4.2
+P57765,Al-7075,Brightline,Nickel,L4,Night,4132,25.55,14.81,5.56,7.32,,0.819,71.6,2.84,25.9,54.1,0.755,3.09
+P73136,Nylon-PA6,Sundara,Powder,L3,Night,1635,28.95,18.85,10.95,6.88,8.2,2.097,1.0,1.679,27.1,47.1,0.663,3.26
+P19473,Nylon-PA6,Alder & Co,Anodized,L1,Night,3952,38.35,35.63,20.14,29.8,11.6,0.68,0.7,0.96,24.8,53.8,1.009,3.35
+P13331,Steel-1045,Norvik,Nickel,L2,Day,1303,29.98,17.38,6.74,32.37,68.4,2.996,6.5,1.085,20.9,68.7,0.955,2.86
+P14176,Ti-Gr5,Kestrel,Zinc,L2,Day,4138,23.59,18.04,16.44,,249.6,5.371,1.0,0.644,20.9,39.0,0.69,3.8
+P46745,Copper-C110,Alder & Co,Powder,L1,Day,3195,31.06,26.47,13.22,96.78,26.2,1.566,107.4,1.632,27.1,51.5,0.909,2.56
+P93870,Al-6061,Sundara,Anodized,L4,Day,1730,49.02,25.2,15.14,42.86,121.8,0.909,92.9,1.52,23.5,43.4,0.373,4.4
+P63906,Steel-1045,Alder & Co,Nickel,L4,Evening,1355,35.38,19.08,4.71,27.26,88.5,2.378,9.0,1.221,25.7,37.1,0.826,3.81
+P47950,Steel-304,Sundara,Anodized,L1,Day,3992,17.39,18.57,6.09,18.05,225.4,3.852,6.8,2.759,30.9,53.1,1.005,3.33
