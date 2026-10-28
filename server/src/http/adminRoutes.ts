@@ -12,6 +12,7 @@ import { recomputeTeam } from '../services/scoring.js';
 import { enqueueSubmission, queueStats } from '../services/queue.js';
 import { buildLeaderboard } from './playerRoutes.js';
 import { safeUnlink } from '../services/storage.js';
+import { runAdminEvaluator } from '../services/adminEvaluator.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin); // every /api/admin/* route is gated server-side
@@ -182,6 +183,66 @@ adminRouter.post('/submissions/:id/cancel', async (req, res) => {
   if (r.count === 0) throw new HttpError(409, 'NOT_CANCELLABLE', 'Submission is not queued or running.');
   await audit(req.user!.id, 'SUBMISSION_CANCEL', id);
   ok(res, { id, status: 'CANCELLED' });
+});
+
+adminRouter.post('/submissions/:id/admin-evaluate', async (req, res) => {
+  const id = parse(idParam, req.params.id);
+  const s = await prisma.submission.findUnique({ where: { id } });
+  if (!s) throw new HttpError(404, 'NOT_FOUND', 'Submission not found.');
+  const evalResult = await runAdminEvaluator(s.artifactPath);
+  await prisma.evaluationResult.upsert({
+    where: { submissionId: id },
+    create: { submissionId: id, adminMetrics: evalResult as any },
+    update: { adminMetrics: evalResult as any },
+  });
+  await audit(req.user!.id, 'ADMIN_EVALUATION_RUN', id, { result: evalResult });
+  ok(res, { submissionId: id, result: evalResult });
+});
+
+adminRouter.post('/admin-evaluate-all', async (req, res) => {
+  const subs = await prisma.submission.findMany({
+    where: { status: 'COMPLETED' },
+    orderBy: { completedAt: 'desc' },
+    include: { team: { select: { name: true } } },
+  });
+  const results: any[] = [];
+  for (const s of subs) {
+    const evalResult = await runAdminEvaluator(s.artifactPath);
+    await prisma.evaluationResult.upsert({
+      where: { submissionId: s.id },
+      create: { submissionId: s.id, adminMetrics: evalResult as any },
+      update: { adminMetrics: evalResult as any },
+    });
+    results.push({ submissionId: s.id, teamName: s.team.name, stage: s.stage, result: evalResult });
+  }
+  await audit(req.user!.id, 'ADMIN_EVALUATION_ALL', null, { count: results.length });
+  ok(res, { evaluated: results.length, results });
+});
+
+adminRouter.get('/admin-eval-results', async (_req, res) => {
+  const subs = await prisma.submission.findMany({
+    where: { status: 'COMPLETED' },
+    orderBy: { completedAt: 'desc' },
+    include: {
+      team: { select: { id: true, name: true, variantId: true } },
+      result: true,
+    },
+  });
+  ok(res, subs.map((s) => ({
+    submissionId: s.id,
+    teamId: s.team.id,
+    teamName: s.team.name,
+    variantId: s.team.variantId,
+    stage: s.stage,
+    status: s.status,
+    completedAt: s.completedAt,
+    standardMetrics: {
+      accuracy: s.result?.accuracy ?? null,
+      f1: s.result?.f1 ?? null,
+      qualified: s.result?.qualified ?? false,
+    },
+    adminMetrics: s.result?.adminMetrics ?? null,
+  })));
 });
 
 // ---------- competition ----------

@@ -48,6 +48,38 @@ describe('Metrics & Scoring Unit Tests', () => {
     expect(normalizeName('decision_tree')).toBe('DECISIONTREE');
   });
 
+  it('accepts both HistGradientBoostingClassifier and GradientBoostingClassifier for gradient boosting', () => {
+    const sb1 = {
+      ok: true as const,
+      predictions: [65, 66],
+      estimator: 'GradientBoostingClassifier',
+      isPipeline: true,
+      sklearnVersion: '1.6.1',
+      seconds: 0.1,
+    };
+    const outcome1 = scorePredictions(sb1, [65, 66], {
+      estimator: 'HistGradientBoostingClassifier',
+      minAccuracy: 0.75,
+    });
+    expect(outcome1.errorCode).toBeNull();
+    expect(outcome1.qualified).toBe(true);
+
+    const sb2 = {
+      ok: true as const,
+      predictions: [65, 66],
+      estimator: 'HistGradientBoostingClassifier',
+      isPipeline: true,
+      sklearnVersion: '1.6.1',
+      seconds: 0.1,
+    };
+    const outcome2 = scorePredictions(sb2, [65, 66], {
+      estimator: 'GradientBoostingClassifier',
+      minAccuracy: 0.75,
+    });
+    expect(outcome2.errorCode).toBeNull();
+    expect(outcome2.qualified).toBe(true);
+  });
+
   it('orders leaderboard deterministically with tie-breakers', () => {
     const t1 = { id: '1', name: 'Alpha', totalScore: 100, lastScoreAt: new Date(1000) };
     const t2 = { id: '2', name: 'Beta', totalScore: 100, lastScoreAt: new Date(500) }; // earlier wins

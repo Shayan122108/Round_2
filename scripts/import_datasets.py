@@ -199,6 +199,42 @@ def main() -> int:
         }
     check(len(set(letter_sets.values())) == 4, "the four letter multisets are pairwise different")
 
+    # Copy challenge_features.py to public storage so participants can download it
+    features_py_src = ROOT / "sandbox" / "challenge_features.py"
+    if features_py_src.is_file():
+        copy(features_py_src, pub / "challenge_features.py")
+        print("PASS  challenge_features.py copied to public storage")
+
+    # Admin Holdout Dataset (test_for_admin.csv)
+    admin_csv = src / "datasets" / "test_for_admin.csv"
+    if admin_csv.is_file():
+        df_admin = pd.read_csv(admin_csv)
+        print("\n-- admin test holdout (test_for_admin.csv)")
+        check("id" in df_admin.columns, "admin holdout has id column")
+        check(TARGET in df_admin.columns, "admin holdout has sort_bin target column")
+        admin_feat_cols = [c for c in df_admin.columns if c not in ("id", TARGET)]
+        check(admin_feat_cols == features, "admin holdout features match training schema")
+        check(df_admin[TARGET].between(*CLASS_RANGE).all(), "admin holdout labels within 65-90")
+        admin_overlap = len(set(df_admin["id"]) & (set(train["id"]) | set(s2_train["id"])))
+        check(admin_overlap == 0, f"admin holdout has {admin_overlap} overlapping IDs with training sets")
+
+        admin_priv = priv / "admin_eval"
+        admin_priv.mkdir(parents=True, exist_ok=True)
+        copy(admin_csv, admin_priv / "test_for_admin.csv")
+        # Features only (for untrusted worker)
+        df_admin.drop(columns=[TARGET]).to_csv(admin_priv / "features.csv", index=False)
+        # Labels only (for trusted parent)
+        df_admin[["id", TARGET]].to_csv(admin_priv / "labels.csv", index=False)
+        manifest["adminHoldout"] = {
+            "file": "private/admin_eval/test_for_admin.csv",
+            "featuresFile": "private/admin_eval/features.csv",
+            "labelsFile": "private/admin_eval/labels.csv",
+            "rows": len(df_admin),
+            "sha256": sha256(admin_csv),
+            "visibility": "private-admin-only",
+        }
+        print(f"PASS  admin holdout processed: {len(df_admin)} rows segregated into features.csv and labels.csv")
+
     if errors:
         print(f"\n{len(errors)} CHECK(S) FAILED - manifest NOT written")
         return 1

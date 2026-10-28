@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Play, Pause, Square, RefreshCw, AlertTriangle, Users, Database, Clock } from 'lucide-react';
+import { Shield, Play, Pause, Square, RefreshCw, AlertTriangle, Users, Database, Clock, FlaskConical, PlayCircle, CheckCircle2 } from 'lucide-react';
 
 export default function AdminPanel({ authUser, csrfToken, onOpenLogin }) {
   const [overview, setOverview] = useState(null);
   const [teams, setTeams] = useState([]);
   const [submissions, setSubmissions] = useState([]);
+  const [adminResults, setAdminResults] = useState([]);
+  const [evaluatingAll, setEvaluatingAll] = useState(false);
   const [loading, setLoading] = useState(true);
   const [resetConfirm, setResetConfirm] = useState('');
   const [msg, setMsg] = useState('');
@@ -27,10 +29,11 @@ export default function AdminPanel({ authUser, csrfToken, onOpenLogin }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [ovRes, teamsRes, subsRes] = await Promise.all([
+      const [ovRes, teamsRes, subsRes, evalRes] = await Promise.all([
         fetch('/api/admin/overview'),
         fetch('/api/admin/teams'),
-        fetch('/api/admin/submissions?limit=25')
+        fetch('/api/admin/submissions?limit=25'),
+        fetch('/api/admin/admin-eval-results'),
       ]);
 
       if (ovRes.ok) {
@@ -44,6 +47,10 @@ export default function AdminPanel({ authUser, csrfToken, onOpenLogin }) {
       if (subsRes.ok) {
         const body = await subsRes.json();
         setSubmissions(body.data || []);
+      }
+      if (evalRes.ok) {
+        const body = await evalRes.json();
+        setAdminResults(body.data || []);
       }
     } catch (err) {
       console.error('Failed to fetch admin data:', err);
@@ -91,6 +98,47 @@ export default function AdminPanel({ authUser, csrfToken, onOpenLogin }) {
       }
     } catch (err) {
       setMsg(`Reset failed: ${err.message}`);
+    }
+  };
+
+  const handleRunAdminEval = async (submissionId) => {
+    setMsg(`Running admin evaluation on submission ${submissionId.slice(0, 8)}...`);
+    try {
+      const res = await fetch(`/api/admin/submissions/${submissionId}/admin-evaluate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg(`Admin evaluation completed for submission ${submissionId.slice(0, 8)}.`);
+        fetchData();
+      } else {
+        setMsg(`Admin evaluation error: ${data.message || 'Failed'}`);
+      }
+    } catch (err) {
+      setMsg(`Error running admin evaluation: ${err.message}`);
+    }
+  };
+
+  const handleRunAllAdminEval = async () => {
+    setEvaluatingAll(true);
+    setMsg('Running admin holdout evaluator on all completed submissions...');
+    try {
+      const res = await fetch('/api/admin/admin-evaluate-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg(`Admin holdout evaluation finished for ${data.data?.evaluated || 0} submission(s).`);
+        fetchData();
+      } else {
+        setMsg(`Evaluation run error: ${data.message || 'Failed'}`);
+      }
+    } catch (err) {
+      setMsg(`Error: ${err.message}`);
+    } finally {
+      setEvaluatingAll(false);
     }
   };
 
@@ -219,6 +267,96 @@ export default function AdminPanel({ authUser, csrfToken, onOpenLogin }) {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Admin Holdout Benchmark */}
+      <div className="glass-panel p-6 border-cyan-500/30">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div>
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <FlaskConical className="w-4 h-4 text-cyan-400" /> Admin Holdout Benchmark (<code>test_for_admin.csv</code>)
+            </h3>
+            <p className="text-xs text-[var(--text-muted)] mt-1">
+              Evaluates submitted participant models against the organizer-only 400-row holdout dataset using <code>evaluator.py</code>.
+            </p>
+          </div>
+          <button
+            onClick={handleRunAllAdminEval}
+            disabled={evaluatingAll || loading}
+            className="btn btn-primary !py-2 !px-3 text-xs flex items-center gap-1.5"
+          >
+            <PlayCircle className={`w-3.5 h-3.5 ${evaluatingAll ? 'animate-spin' : ''}`} />
+            <span>{evaluatingAll ? 'Evaluating Models...' : 'Evaluate All Submissions'}</span>
+          </button>
+        </div>
+
+        {adminResults.length === 0 ? (
+          <div className="p-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            No completed participant models have been evaluated yet. Once models are submitted, click "Evaluate All Submissions" to benchmark them on <code>test_for_admin.csv</code>.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-950 text-slate-400 font-mono uppercase border-b border-slate-800">
+                <tr>
+                  <th className="py-2.5 px-3">Team</th>
+                  <th className="py-2.5 px-3">Stage</th>
+                  <th className="py-2.5 px-3">Accuracy</th>
+                  <th className="py-2.5 px-3">Macro F1</th>
+                  <th className="py-2.5 px-3">RMSE</th>
+                  <th className="py-2.5 px-3">MAE</th>
+                  <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 font-mono">
+                {adminResults.map((r) => {
+                  const m = r.adminMetrics;
+                  const hasSuccess = m && m.status === 'success';
+                  return (
+                    <tr key={r.submissionId} className="hover:bg-slate-800/30">
+                      <td className="py-3 px-3 font-sans font-semibold text-white">{r.teamName}</td>
+                      <td className="py-3 px-3 text-indigo-300">Stage {r.stage}</td>
+                      <td className="py-3 px-3 text-emerald-400 font-bold">
+                        {hasSuccess ? `${(m.accuracy * 100).toFixed(1)}%` : '-'}
+                      </td>
+                      <td className="py-3 px-3 text-cyan-300">
+                        {hasSuccess ? m.macro_f1?.toFixed(3) : '-'}
+                      </td>
+                      <td className="py-3 px-3 text-amber-300">
+                        {hasSuccess ? m.rmse?.toFixed(3) : '-'}
+                      </td>
+                      <td className="py-3 px-3 text-purple-300">
+                        {hasSuccess ? m.mae?.toFixed(3) : '-'}
+                      </td>
+                      <td className="py-3 px-3">
+                        {hasSuccess ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-400 text-[11px]">
+                            <CheckCircle2 className="w-3 h-3" /> Evaluated
+                          </span>
+                        ) : m?.error_code ? (
+                          <span className="text-rose-400 text-[11px] font-sans">
+                            {m.error_code}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500 text-[11px] font-sans">Pending</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <button
+                          onClick={() => handleRunAdminEval(r.submissionId)}
+                          className="btn btn-secondary !py-1 !px-2.5 text-[11px]"
+                        >
+                          Re-run
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Danger Zone */}

@@ -17,6 +17,9 @@ export const paths = {
   clue: (variantId: number) => path.join(config.storageRoot, 'public', 'clues', `variant_${Number(variantId)}.csv`),
   evalFeatures: (key: string) => path.join(config.storageRoot, 'private', 'eval', safeKey(key), 'features.csv'),
   evalLabels: (key: string) => path.join(config.storageRoot, 'private', 'eval', safeKey(key), 'labels.csv'),
+  adminEvalFeatures: () => path.join(config.storageRoot, 'private', 'admin_eval', 'features.csv'),
+  adminEvalLabels: () => path.join(config.storageRoot, 'private', 'admin_eval', 'labels.csv'),
+  adminEvalDataset: () => path.join(config.storageRoot, 'private', 'admin_eval', 'test_for_admin.csv'),
 };
 
 function safeKey(key: string) {
