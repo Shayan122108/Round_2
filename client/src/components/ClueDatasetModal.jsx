@@ -4,18 +4,18 @@ import { X, Download, FileSpreadsheet, Sparkles, RefreshCw } from 'lucide-react'
 export default function ClueDatasetModal({
   isOpen,
   onClose,
-  teamId
+  unlocked
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (isOpen && teamId) {
+    if (isOpen && unlocked) {
       setLoading(true);
-      fetch(`/api/datasets/clue-preview/${teamId}`)
+      fetch('/api/datasets/clue/preview')
         .then(res => res.json())
         .then(d => {
-          setData(d);
+          setData(d.data || d);
           setLoading(false);
         })
         .catch(err => {
@@ -23,7 +23,7 @@ export default function ClueDatasetModal({
           setLoading(false);
         });
     }
-  }, [isOpen, teamId]);
+  }, [isOpen, unlocked]);
 
   if (!isOpen) return null;
 
@@ -54,7 +54,7 @@ export default function ClueDatasetModal({
 
           <div className="flex items-center gap-2">
             <a
-              href={`/api/datasets/clue-dataset/${teamId}`}
+              href="/api/datasets/clue"
               download="clue_dataset.csv"
               className="btn btn-primary !py-2 !px-3 text-xs flex items-center gap-1.5"
             >

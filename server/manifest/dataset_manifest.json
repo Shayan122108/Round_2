@@ -1,0 +1,162 @@
+{
+  "source": "C:\\Users\\shaya\\shayan\\3-1\\SDC_R3\\ml-challenge-platform\\server\\data",
+  "compromisedEvaluationData": true,
+  "repositoryB": "UNVERIFIED (404 at audit time)",
+  "stage1": {
+    "train": {
+      "file": "public/stage1_train.csv",
+      "rows": 1600,
+      "sha256": "2ad8b804c3ac6e58a316259c8968d95985ae5726d6aa07e49e0a155b585171e7",
+      "visibility": "participant-accessible",
+      "sourcePath": "datasets\\train.csv"
+    }
+  },
+  "stage2": {
+    "leakedRowsInPublicStage1Train": 400,
+    "train": {
+      "file": "public/stage2_train.csv",
+      "rows": 1200,
+      "sha256": "ce13d7cd8b4acb0c972efbf8b17f7772f5128347dfa72f9503ec0cafd55265a5",
+      "visibility": "participant-accessible"
+    },
+    "testFeatures": {
+      "file": "private/eval/stage2/features.csv",
+      "rows": 400,
+      "sha256": "04c2f1a38631d237c73a4daa0ce286b32ef03a321cb67f19ef8b1463da4fa9bd",
+      "visibility": "private"
+    },
+    "referenceLabels": {
+      "file": "private/eval/stage2/labels.csv",
+      "rows": 400,
+      "sha256": "d6f7b7abd1ae33b04ea6f8fbbe4f340124a3e9da21689e55f6cb0306bcd2fb3f",
+      "visibility": "private"
+    }
+  },
+  "featureColumns": [
+    "material",
+    "supplier",
+    "coating",
+    "line_id",
+    "shift",
+    "batch_number",
+    "length_mm",
+    "width_mm",
+    "thickness_mm",
+    "weight_g",
+    "hardness_hv",
+    "surface_roughness_um",
+    "conductivity_iacs",
+    "magnetic_response_idx",
+    "ambient_temp_c",
+    "humidity_pct",
+    "vibration_rms",
+    "inspection_time_s"
+  ],
+  "target": "sort_bin",
+  "variants": {
+    "1": {
+      "estimator": "RandomForestClassifier",
+      "anagramLetters": 12,
+      "testFeatures": {
+        "file": "private/eval/variant_1/features.csv",
+        "rows": 12,
+        "sha256": "efe39b17cf43310d06eb940868e6d7197b8167b5beaae79bd384be4f06710278",
+        "visibility": "private"
+      },
+      "referenceLabels": {
+        "file": "private/eval/variant_1/labels.csv",
+        "rows": 12,
+        "sha256": "a98be963d9f03c7b7ad5ba6dcf9cee7c707476e6fdab0f401c0b14db11f61081",
+        "visibility": "private"
+      },
+      "clue": {
+        "file": "public/clues/variant_1.csv",
+        "rows": 36,
+        "sha256": "636bb05fadbbe7847a7ebc330c5534af484ffc1f03e0a6bc8bff82bad6d69236",
+        "visibility": "participant-accessible (after Stage 1 qualification)"
+      },
+      "sampleSubmission": {
+        "sha256": "df411d0dbb9a42fc61d2f06ef21cae11931270b33c568ae21ef653a776c1490d",
+        "visibility": "legacy-csv-only"
+      }
+    },
+    "2": {
+      "estimator": "DecisionTreeClassifier",
+      "anagramLetters": 12,
+      "testFeatures": {
+        "file": "private/eval/variant_2/features.csv",
+        "rows": 12,
+        "sha256": "20471c1bc5198014914727051ce679cc5b374fc32b27ea21789945109061f54a",
+        "visibility": "private"
+      },
+      "referenceLabels": {
+        "file": "private/eval/variant_2/labels.csv",
+        "rows": 12,
+        "sha256": "78c6d2cc6ed7aa3ed27fa69efad565ee1e0a59a880a23b7eaee2cad14cdbb323",
+        "visibility": "private"
+      },
+      "clue": {
+        "file": "public/clues/variant_2.csv",
+        "rows": 36,
+        "sha256": "10057e48a7147529cd9e75a9d8ac3b7c10e3b708ef67cffd652e1a91259d201f",
+        "visibility": "participant-accessible (after Stage 1 qualification)"
+      },
+      "sampleSubmission": {
+        "sha256": "c4a5e538f47f3f61731a2c860bb8c087b4807f53e66b72e57db9199c82449ddb",
+        "visibility": "legacy-csv-only"
+      }
+    },
+    "3": {
+      "estimator": "GaussianNB",
+      "anagramLetters": 10,
+      "testFeatures": {
+        "file": "private/eval/variant_3/features.csv",
+        "rows": 10,
+        "sha256": "4eb3a95a547754c91cfddb6e677a39b9007b1f1a1f8e8b9df5466faf5a48d5a0",
+        "visibility": "private"
+      },
+      "referenceLabels": {
+        "file": "private/eval/variant_3/labels.csv",
+        "rows": 10,
+        "sha256": "4bf6c0060489171fc9fcbe14b236acddf2cd508457a95a9dd1c848d621a5dcc4",
+        "visibility": "private"
+      },
+      "clue": {
+        "file": "public/clues/variant_3.csv",
+        "rows": 30,
+        "sha256": "f7a9c770e5ea45ed813b874b928c17edc849b2f2f001dc701cdaba515ea61f23",
+        "visibility": "participant-accessible (after Stage 1 qualification)"
+      },
+      "sampleSubmission": {
+        "sha256": "6f91b183d1045452fe5b8b9fee2863ddf041fff12648b22c9321cf298c195ea7",
+        "visibility": "legacy-csv-only"
+      }
+    },
+    "4": {
+      "estimator": "HistGradientBoostingClassifier",
+      "anagramLetters": 16,
+      "testFeatures": {
+        "file": "private/eval/variant_4/features.csv",
+        "rows": 16,
+        "sha256": "3057daa85f598654b52a89009d7e87e02d638760d2d76f2d2b182bb44ef26314",
+        "visibility": "private"
+      },
+      "referenceLabels": {
+        "file": "private/eval/variant_4/labels.csv",
+        "rows": 16,
+        "sha256": "3b2b3c12c5be4cf907c971e305b64856f6817ae7dcc223a8798ab89e4d6be581",
+        "visibility": "private"
+      },
+      "clue": {
+        "file": "public/clues/variant_4.csv",
+        "rows": 48,
+        "sha256": "c70c97c286b413d99df040c94e06b92289a5fae2e5dae60faeae07332d974fa7",
+        "visibility": "participant-accessible (after Stage 1 qualification)"
+      },
+      "sampleSubmission": {
+        "sha256": "c13bbbd7bb016e4f68523f68532b386eb58645b72be1247ce16f810c09c9786e",
+        "visibility": "legacy-csv-only"
+      }
+    }
+  }
+}

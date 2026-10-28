@@ -10,7 +10,14 @@ console.log('🚀 Starting ML Challenge Platform (Full-Stack Dev) ...');
 console.log('----------------------------------------------------');
 
 // Start Express Backend
-const server = spawn('node', ['server.js'], {
+const server = spawn('npm', ['run', 'dev'], {
+  cwd: path.join(__dirname, 'server'),
+  stdio: 'inherit',
+  shell: true
+});
+
+// Start BullMQ Worker
+const worker = spawn('npm', ['run', 'worker'], {
   cwd: path.join(__dirname, 'server'),
   stdio: 'inherit',
   shell: true
@@ -24,8 +31,9 @@ const client = spawn('npm', ['run', 'dev'], {
 });
 
 function cleanup() {
-  console.log('\nStopping servers...');
+  console.log('\nStopping servers and worker...');
   server.kill();
+  worker.kill();
   client.kill();
   process.exit(0);
 }

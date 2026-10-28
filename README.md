@@ -1,176 +1,141 @@
-# ML Challenge Platform
+# ML Challenge Platform — Round 2 Production Implementation
 
-A web platform for a timed (90-minute), multi-stage machine-learning competition built around the **Precision-Parts Sorting Line** dataset.
-
-Teams train a model, decode their predictions into letters, solve an anagram to discover a hidden algorithm, and then use that algorithm in a final stage. Scores and a live leaderboard are managed by the server.
+Complete, secure, multi-stage machine learning competition platform.
 
 ---
 
-## How the competition works
-
-| Stage | What teams do | Points |
-|---|---|---|
-| **1. Logistic Regression** | Train `LogisticRegression` on the shared `train.csv`, predict their own `test.csv`, and upload `id,prediction`. Qualify with ≥ 75% accuracy. | **+30** |
-| **2. Anagram** | Predictions are ASCII codes (65–90). Decode them into letters and unscramble them into the name of an ML algorithm. | **+50** |
-| **3. Final ML evaluation** | Use the discovered algorithm (starter code unlocks after the anagram) on the Stage 2 data. Must meet an accuracy and Macro-F1 target for that variant. | **+70** |
-| Penalty | Each wrong anagram guess | **−30** |
-
-`Total = Stage1 + Anagram + Stage2 − 30 × wrong guesses`, kept between **0 and 150**.
-Leaderboard ties are broken by the earliest last qualifying submission.
-
-### Variants
-
-Every team is secretly assigned one of four test sets. Each set decodes to a different algorithm:
-
-| Variant | Hidden algorithm | Rows | Scrambled letters |
-|---|---|---|---|
-| A (1) | RANDOM FOREST | 12 | `ADMFOERNOSRT` |
-| B (2) | DECISION TREE | 12 | `CREEOITIDSEN` |
-| C (3) | NAIVE BAYES | 10 | `YVEAEASIBN` |
-| D (4) | GRADIENT BOOSTING | 16 | `GTNATINGOIODSRBE` |
-
-Teams never see their variant label or algorithm name until they solve the anagram. The test file is always downloaded as `test.csv`.
-
----
-
-## Tech stack
-
-- **Client:** React 19 + Vite 8, Tailwind CSS v4, `lucide-react`, `canvas-confetti`
-- **Server:** Node.js + Express 4, `multer` (file uploads), JSON file storage
-- **Evaluation:** done in Node ([`server/evaluator.js`](server/evaluator.js))
-
-## Project structure
+## 1. Architecture Overview
 
 ```
-ml-challenge-platform/
-├── package.json            # Root scripts (dev / start / build)
-├── start-dev.js            # Runs the server and the Vite dev server together
-├── client/                 # React frontend
-│   ├── vite.config.js      # Port 3000, proxies /api → localhost:5000
-│   └── src/
-│       ├── App.jsx
-│       ├── index.css       # Design tokens + custom styles (in @layer components)
-│       └── components/     # Navbar, Stage1Card, AnagramCard, Stage2Card,
-│                           # Leaderboard, AdminPanel, modals, ...
-└── server/
-    ├── server.js           # REST API; also serves client/dist when it exists
-    ├── storage.js          # State, scoring, seed data, starter code per variant
-    ├── evaluator.js        # Stage 1 / Stage 2 scoring
-    ├── python_worker.py    # Optional scikit-learn evaluator (not wired in yet)
-    ├── uploads/            # Temporary upload folder
-    └── data/
-        ├── datasets/       # train.csv, variant_N/{test, sample_submission, clue_dataset}.csv, stage2/
-        ├── answer_keys/    # ⚠ CONFIDENTIAL answer keys
-        └── state.json      # Created at runtime: teams, scores, submissions, audit log
+React 19 Frontend (Vite + Tailwind CSS v4)
+         │  (Secure session cookie + CSRF token + Origin validation)
+         ▼
+Express API Backend (Node.js 22 LTS, Zod validation, Helmet, Rate Limiter)
+         │
+         ├──► PostgreSQL 16 (Authoritative State, Foreign Keys, Row-Level Locks)
+         │       • Participants, Teams, Variants (private metadata)
+         │       • Submissions (durable records before enqueueing)
+         │       • Stage Completions (unique constraints preventing double awards)
+         │       • Atomic Anagram Penalties (30-point deduction, score clamped 0..150)
+         │
+         ├──► Redis 7 & BullMQ
+         │       • Asynchronous evaluation queue with bounded concurrency
+         │       • Automated recovery loop for unqueued/stale evaluations
+         │
+         └──► Isolated Python 3.11 Evaluation Worker
+                 • Docker sandbox (`mlc-sandbox:1`) with `--network none`, non-root user (65534:65534), read-only mounts, memory (1GB) and CPU limits
+                 • Untrusted `.joblib` pipelines evaluated ONLY against test features
+                 • Private reference labels & answer keys NEVER mounted in the container
+                 • Trusted scoring service computes authoritative metrics (Accuracy, Macro F1)
 ```
 
 ---
 
-## Getting started
+## 2. Competition Rules & Stages
 
-**Requirements:** Node.js 18+ (developed on Node 22).
-
-```bash
-# install dependencies
-npm --prefix server install
-npm --prefix client install
-```
-
-### Development (hot reload)
-
-```bash
-npm run dev
-```
-
-- Frontend: http://localhost:3000
-- API: http://localhost:5000
-
-### Production-style (single port)
-
-```bash
-npm run build:client   # builds client/dist
-npm start              # Express serves the API and the built UI
-```
-
-Open http://localhost:5000.
-
-Use the `PORT` environment variable to change the server port.
+1. **Stage 1 — Logistic Regression Challenge**:
+   - Participants download `train.csv` (1,600 precision parts) and helper script `challenge_features.py`.
+   - Participants train a `scikit-learn` `LogisticRegression` pipeline and upload `model.joblib`.
+   - Worker evaluates against private test features; meeting the 75% accuracy threshold awards **30 points** (once).
+2. **Anagram Challenge**:
+   - Unlocked only after qualifying Stage 1.
+   - Shows scrambled letters (`variant_map.csv`) and allows preview/download of personalized `clue_dataset.csv`.
+   - Each incorrect attempt deducts an atomic **30-point penalty**. Total score is clamped to **0–150**.
+   - Correct answer awards **50 points** and unlocks Stage 2 dataset & starter boilerplate.
+3. **Stage 2 — Secret Variant ML Benchmark**:
+   - Accessible only after solving the anagram.
+   - Participants train their unlocked algorithm (`RandomForestClassifier`, `DecisionTreeClassifier`, `GaussianNB`, or `HistGradientBoostingClassifier`) on `stage2_train.csv`.
+   - Qualifying awards **70 points** (once). Maximum total score: **150 points**.
 
 ---
 
-## Using the app
+## 3. Local Development & Deployment (Windows & Docker)
 
-- **Dashboard:** the team's score summary, dataset downloads, and the three stage cards. Later stages unlock as earlier ones are completed.
-- **Leaderboard:** top-3 podium and the full ranking table. Refreshes every 4 seconds.
-- **Admin:** the confidential view. Includes team → variant mapping (can be reassigned), all four variant configs, competition clock (start / pause / reset), team registration, score reset, and audit logs for submissions and anagram guesses.
+### Prerequisites
+- Node.js 22 LTS
+- Python 3.11 (with `scikit-learn==1.6.1`, `pandas`, `numpy`, `joblib`)
+- Docker Desktop (with WSL2 backend enabled)
 
-### Demo teams
-
-The first time it runs, the server creates sample teams (PIN `1234`) in different states:
-
-| ID | Team | Variant | State |
-|---|---|---|---|
-| REG-101 | Neural Knights | A | All stages cleared (150) |
-| REG-102 | Gradient Gurus | B | Anagram solved after 1 wrong guess (50) |
-| REG-103 | Vector Voyagers | C | Stage 1 qualified (30) |
-| REG-104 | Tensor Titans | D | Not started (0) |
-| REG-105 | Deep Divers | A | 2 wrong guesses (0) |
-
-Use the team button in the top-right to switch teams.
-
-**Start fresh for a real event:** stop the server, delete `server/data/state.json`, and restart. Or use **Admin → Reset Scores**, which keeps the teams but clears all progress.
-
-### Submission format
-
-```csv
-id,prediction
-P78165,65
-P56216,68
-...
+### Step 1: Environment Configuration
+Copy `.env.example` to `.env`:
+```powershell
+cp .env.example .env
 ```
 
-For Stage 1, rows must be in the **same order as `test.csv`**. The order is what makes the decoded letters spell the word.
+Ensure `.env` contains:
+```ini
+NODE_ENV=development
+POSTGRES_PORT=55432
+DATABASE_URL=postgresql://mlc:mlc_dev_password@127.0.0.1:55432/mlchallenge?schema=public
+REDIS_PORT=56379
+REDIS_URL=redis://127.0.0.1:56379
+SESSION_SECRET=replace-with-long-random-string-at-least-32-chars
+PORT=5000
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5000,http://localhost:3000
+SANDBOX_MODE=docker
+SANDBOX_IMAGE=mlc-sandbox:1
+ALLOW_COMPROMISED_EVAL_DATA=1
+```
+
+### Step 2: Start Infrastructure (PostgreSQL & Redis)
+```powershell
+docker compose up -d --wait
+```
+
+### Step 3: Build the Python Evaluation Sandbox Image
+```powershell
+docker build -t mlc-sandbox:1 ./sandbox
+```
+
+### Step 4: Import & Verify Competition Datasets
+```powershell
+python scripts/import_datasets.py
+```
+*Note: Evaluates train/test schemas, checks 26 ASCII classes (65-90), verifies anagram multisets, and imports datasets to private server storage.*
+
+### Step 5: Database Setup & Seed
+```powershell
+cd server
+node --env-file=.env node_modules\prisma\build\index.js db push
+node --env-file=.env --import tsx prisma/seed.ts
+```
+
+### Step 6: Start Server, Worker & Frontend
+In separate terminals:
+- **API Server**:
+  ```powershell
+  cd server
+  npm run dev
+  ```
+- **BullMQ Python Worker**:
+  ```powershell
+  cd server
+  npm run worker
+  ```
+- **React Frontend**:
+  ```powershell
+  cd client
+  npm run dev
+  ```
 
 ---
 
-## API overview
+## 4. Default Seed Accounts
 
-| Method | Endpoint | Purpose |
-|---|---|---|
-| POST | `/api/auth/login` | Log in with `registrationId` (+ optional `pin`) |
-| GET | `/api/team/:id` | Team state as the contestant sees it |
-| GET | `/api/datasets/train` | Shared training set |
-| GET | `/api/datasets/test/:teamId` | The team's assigned test set (served as `test.csv`) |
-| GET | `/api/datasets/sample-submission/:teamId` | Sample submission |
-| GET | `/api/datasets/clue-dataset/:teamId` | Clue CSV (requires Stage 1) |
-| GET | `/api/datasets/stage2/{train,test}` | Stage 2 data |
-| POST | `/api/submissions/stage1` | Upload a Stage 1 CSV (`file` or `csvContent`, plus `teamId`) |
-| POST | `/api/anagram/submit` | `{ teamId, answer }`. Spaces, case and punctuation are ignored |
-| POST | `/api/submissions/stage2` | Upload a Stage 2 CSV (requires the solved anagram) |
-| GET | `/api/leaderboard` | Rankings + competition clock |
-| GET | `/api/admin/overview` | Confidential admin data |
-| POST | `/api/admin/timer` | `{ action: start \| pause \| reset, durationMinutes }` |
-| POST | `/api/admin/teams` | Register a team |
-| POST | `/api/admin/teams/:id/reassign-variant` | Change a team's variant |
-| POST | `/api/admin/variants/:id` | Update variant targets / starter code |
-| POST | `/api/admin/reset-scores` | Clear all progress |
+- **Participant Teams**:
+  - `REG-101` / PIN: `1234` (Neural Knights — Variant 1: Random Forest)
+  - `REG-102` / PIN: `1234` (Gradient Gurus — Variant 2: Decision Tree)
+  - `REG-103` / PIN: `1234` (Vector Voyagers — Variant 3: Naive Bayes)
+  - `REG-104` / PIN: `1234` (Tensor Titans — Variant 4: Gradient Boosting)
+  - `REG-105` / PIN: `1234` (Deep Divers — Variant 1)
+- **Administrator**:
+  - `ADMIN` / PIN: `AdminSecure123!` (or the PIN configured in your `.env`)
 
 ---
 
-## ⚠ Known limitations (read before a live event)
+## 5. Security & Isolation Controls
 
-- **No admin authentication.** Anyone who can reach the server can open the Admin tab and `/api/admin/*`, which expose every team's hidden algorithm. Add authentication, or run the server only on a trusted network, before contestants connect.
-- **PINs are optional.** The login and team switcher do not require a PIN. The quick-switch list is meant for demos only.
-- **Stage 2 data is a placeholder.** `stage2_train.csv` and `stage2_test.csv` are a 1200/400 split of the Stage 1 `train.csv`. Teams already hold the labels for the Stage 2 test rows. Replace these files with a real held-out dataset.
-- **The clue dataset shows the target.** Each clue row includes `sort_bin` and an `observed_resonance_char` column. Teams already know their letters after Stage 1, but review whether this gives away more than you want.
-- **Answer keys live in the repo.** `server/data/answer_keys/` and `server/data/datasets/variant_*` should not be shared with contestants or pushed to a public repository.
-- **JSON file storage.** Fine for a single server process. Use a real database if several server instances will run at once.
-- **Clock pause/resume** is basic. "Start" restarts the full duration instead of resuming the remaining time.
-
----
-
-## Related files (parent folder)
-
-- `ORGANIZER_GUIDE.md`: confidential organizer notes (variants, fairness, leak prevention)
-- `PARTICIPANT_INSTRUCTIONS.md`: instructions handed to teams
-- `baseline_solution.py` / `validate_answer.py`: reference solution and answer validation
+1. **Pickle / Joblib Execution Isolation**: Untrusted `.joblib` models run inside unprivileged Docker containers (`--network none`, `--cap-drop ALL`, `--read-only`, non-root user `65534`). Ground-truth labels and answer keys are never placed in the container.
+2. **Authoritative Scores**: Evaluator metrics and scores are computed exclusively in trusted Node.js code wrapped in PostgreSQL transactions with `SELECT ... FOR UPDATE` row locks.
+3. **Defense Against Answer Key Leaks**: Ground-truth answer keys from public repository history are tagged in `dataset_manifest.json`. Organizers can provide fresh holdouts via `python scripts/import_datasets.py --private-dir <dir>` prior to a live competition.
+4. **Cookie Authentication & Anti-CSRF**: Session tokens are encrypted in secure `httpOnly` cookies with `SameSite=Strict`. Mutating endpoints require `X-CSRF-Token` validation matching the session.

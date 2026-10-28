@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Lock, Unlock, AlertTriangle, CheckCircle2, FileSpreadsheet, Sparkles, Send, HelpCircle, Code2 } from 'lucide-react';
+import { Lock, AlertTriangle, CheckCircle2, FileSpreadsheet, Send, Code2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function AnagramCard({
-  team,
+  dashboardData,
+  csrfToken,
   onRefreshTeam,
   onOpenClueModal,
   onOpenBoilerplate
@@ -14,10 +15,11 @@ export default function AnagramCard({
   const [errorMsg, setErrorMsg] = useState('');
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 
-  const isLocked = !team.stage1Qualified;
-  const isSolved = team.anagramSolved;
-  const incorrectAttempts = team.anagramIncorrectAttempts || 0;
-  const penaltyPoints = incorrectAttempts * 30;
+  const isLocked = !dashboardData?.stages?.stage1?.completed;
+  const isSolved = dashboardData?.stages?.anagram?.completed;
+  const incorrectAttempts = dashboardData?.breakdown?.incorrectAttempts || 0;
+  const penaltyPoints = dashboardData?.breakdown?.penalties || 0;
+  const letters = dashboardData?.anagram?.letters;
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -34,21 +36,21 @@ export default function AnagramCard({
     try {
       const res = await fetch('/api/anagram/submit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teamId: team.id,
-          answer: guess.trim()
-        })
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify({ answer: guess.trim() })
       });
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Submission failed.');
+        throw new Error(data.error?.message || 'Submission failed.');
       }
 
-      setFeedback(data);
+      setFeedback(data.data);
 
-      if (data.correct) {
+      if (data.data.correct) {
         confetti({
           particleCount: 100,
           spread: 80,
@@ -71,12 +73,6 @@ export default function AnagramCard({
         ? 'border-emerald-500/40 bg-emerald-950/10'
         : 'border-amber-500/30'
     }`}>
-      {/* Background Accent Glow */}
-      <div className={`absolute top-0 right-0 w-80 h-80 rounded-full blur-3xl pointer-events-none ${
-        isSolved ? 'bg-emerald-500/10' : !isLocked ? 'bg-amber-500/10' : 'bg-transparent'
-      }`} />
-
-      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6 relative z-10">
         <div>
           <div className="flex items-center gap-3">
@@ -90,7 +86,7 @@ export default function AnagramCard({
               02
             </span>
             <h2 className="text-xl sm:text-2xl font-bold font-[Outfit] text-white">
-              Anagram Challenge & Boilerplate Unlock
+              Anagram Challenge & Model Discovery
             </h2>
             {isSolved ? (
               <span className="badge badge-emerald">
@@ -108,8 +104,8 @@ export default function AnagramCard({
           </div>
           <p className="text-sm text-[var(--text-muted)] mt-1.5 max-w-2xl">
             {isLocked
-              ? 'Complete Stage 1 Logistic Regression qualification to unlock your team\'s personalized clue dataset and anagram puzzle.'
-              : 'Rearrange your decoded ASCII letters to identify your team\'s secret machine learning algorithm. Solving unlocks your Stage 2 starter boilerplate.'}
+              ? 'Complete Stage 1 Logistic Regression qualification to unlock your team\'s scrambled clue letters and anagram challenge.'
+              : 'Rearrange your team\'s scrambled letters to identify your secret machine learning algorithm. Solving awards 50 points and unlocks Stage 2 starter boilerplate.'}
           </p>
         </div>
 
@@ -117,7 +113,7 @@ export default function AnagramCard({
         <div className="text-right">
           <div className="text-xs uppercase font-semibold text-[var(--text-dim)]">Incorrect Guesses</div>
           <div className={`text-base font-bold font-mono ${incorrectAttempts > 0 ? 'text-rose-400' : 'text-slate-300'}`}>
-            {incorrectAttempts} {incorrectAttempts === 1 ? 'penalty' : 'penalties'} ({penaltyPoints > 0 ? `-${penaltyPoints} pts` : '0 pts'})
+            {incorrectAttempts} attempt(s) ({penaltyPoints > 0 ? `-${penaltyPoints} pts` : '0 pts'})
           </div>
         </div>
       </div>
@@ -125,22 +121,37 @@ export default function AnagramCard({
       {isLocked ? (
         <div className="p-8 text-center bg-slate-900/50 rounded-xl border border-slate-800 text-[var(--text-muted)] flex flex-col items-center justify-center">
           <Lock className="w-10 h-10 text-slate-600 mb-3" />
-          <h4 className="font-bold text-white text-base">Stage 2 Milestone Locked</h4>
+          <h4 className="font-bold text-white text-base">Anagram Challenge Locked</h4>
           <p className="text-xs text-[var(--text-dim)] max-w-md mt-1">
-            Qualify Stage 1 with &gt;= 75% accuracy to receive the personalized clue dataset and anagram solver.
+            Qualify Stage 1 with &gt;= 75% accuracy on hidden test features to unlock your scrambled letters and clue dataset.
           </p>
         </div>
       ) : (
         <div className="space-y-6 relative z-10">
+          {/* Scrambled Letters Tiles */}
+          {letters && !isSolved && (
+            <div className="p-5 rounded-xl bg-slate-900/80 border border-slate-800 text-center">
+              <div className="text-xs font-semibold uppercase text-slate-400 tracking-wider mb-3">
+                Scrambled Letters ({letters.length} Characters)
+              </div>
+              <div className="flex flex-wrap justify-center gap-2">
+                {letters.split('').map((char, i) => (
+                  <span key={i} className="anagram-tile">
+                    {char}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
-          {/* Clue Dataset Access Section */}
+          {/* Clue Dataset Section */}
           <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
                 <FileSpreadsheet className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-white">Personalized Clue Dataset (35 Samples)</h4>
+                <h4 className="text-sm font-bold text-white">Personalized Clue Dataset</h4>
                 <p className="text-xs text-[var(--text-muted)]">
                   Contains inspection measurements and vibration signatures tailored to your assigned anagram puzzle.
                 </p>
@@ -156,7 +167,7 @@ export default function AnagramCard({
                 <span>Preview Data</span>
               </button>
               <a
-                href={`/api/datasets/clue-dataset/${team.id}`}
+                href="/api/datasets/clue"
                 download="clue_dataset.csv"
                 className="btn btn-primary !py-2 !px-3 text-xs"
               >
@@ -170,11 +181,8 @@ export default function AnagramCard({
             <div className="p-4 rounded-xl bg-rose-950/30 border border-rose-500/30 text-xs text-rose-200 flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-rose-300">Strict Scoring Rule:</span> Every incorrect algorithm guess applies an atomic{' '}
-                <span className="font-bold underline text-white">30-point penalty</span> to your overall round score.
-                <div className="mt-1 text-[11px] text-rose-300/80">
-                  Penalty Schedule: 0 wrong = max 150 pts | 1 wrong = max 120 pts | 2 wrong = max 90 pts | 3 wrong = max 60 pts | 4 wrong = max 30 pts | 5+ wrong = 0 pts.
-                </div>
+                <span className="font-bold text-rose-300">Strict Scoring Rule:</span> Each incorrect algorithm guess applies an atomic{' '}
+                <span className="font-bold underline text-white">30-point penalty</span> to your round score. Total score is bounded between 0 and 150.
               </div>
             </div>
           )}
@@ -189,13 +197,13 @@ export default function AnagramCard({
                   </div>
                   <div>
                     <span className="text-xs uppercase font-bold text-emerald-400 tracking-wider">
-                      Secret Algorithm Solved & Locked
+                      Secret Algorithm Solved & Verified
                     </span>
                     <h3 className="text-2xl font-black font-mono tracking-wider text-white">
-                      {team.algorithmName || 'ALGORITHM UNLOCKED'}
+                      {dashboardData?.reveal?.algorithmName || 'ALGORITHM UNLOCKED'}
                     </h3>
                     <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                      +50 milestone points awarded. Starter boilerplate is now unlocked for Stage 2.
+                      +50 milestone points awarded. Stage 2 starter boilerplate is now unlocked below.
                     </p>
                   </div>
                 </div>
@@ -250,16 +258,10 @@ export default function AnagramCard({
                     : 'bg-rose-950/30 border-rose-500/50 text-rose-300'
                 }`}>
                   <p className="font-semibold text-sm mb-1">{feedback.message}</p>
-                  {!feedback.correct && (
-                    <p className="text-[11px] text-rose-300/80">
-                      Total penalties: {feedback.incorrectAttempts} (-{feedback.penaltyPoints} pts). Maximum potential score remaining: {feedback.remainingPossibleScore} pts.
-                    </p>
-                  )}
                 </div>
               )}
             </form>
           )}
-
         </div>
       )}
 

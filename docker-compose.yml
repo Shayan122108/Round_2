@@ -1,0 +1,45 @@
+name: ml-challenge
+
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mlc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlc_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-mlchallenge}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"   # loopback only; 55432 avoids clashing with a local PG
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mlc} -d ${POSTGRES_DB:-mlchallenge}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    # BullMQ requires noeviction; AOF keeps queued jobs across restarts.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-56379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Built on demand (`npm run sandbox:build`); never started as a service.
+  sandbox-image:
+    build: ./sandbox
+    image: mlc-sandbox:1
+    profiles: ["build-only"]
+    entrypoint: ["true"]
+
+volumes:
+  pgdata:
+  redisdata:

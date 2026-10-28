@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "description": "Multi-Stage ML Competition Platform",
   "scripts": {
-    "start": "node server/server.js",
-    "server": "node --watch server/server.js",
+    "start": "node start-dev.js",
+    "server": "npm --prefix server run dev",
+    "worker": "npm --prefix server run worker",
     "client": "npm --prefix client run dev",
     "build:client": "npm --prefix client run build",
     "dev": "node start-dev.js"

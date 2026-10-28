@@ -9,8 +9,9 @@ import TeamLoginModal from './components/TeamLoginModal';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [currentTeamId, setCurrentTeamId] = useState('REG-103'); // Default to Vector Voyagers (in progress) or REG-101
-  const [currentTeam, setCurrentTeam] = useState(null);
+  const [authUser, setAuthUser] = useState(null);
+  const [csrfToken, setCsrfToken] = useState('');
+  const [dashboardData, setDashboardData] = useState(null);
   const [competition, setCompetition] = useState(null);
   const [timeRemaining, setTimeRemaining] = useState(90 * 60);
 
@@ -19,28 +20,48 @@ export default function App() {
   const [clueModalOpen, setClueModalOpen] = useState(false);
   const [teamModalOpen, setTeamModalOpen] = useState(false);
 
-  // Fetch Team & Competition details
-  const fetchTeamData = async (teamId) => {
+  // Check auth session
+  const checkAuth = async () => {
     try {
-      const res = await fetch(`/api/team/${teamId || currentTeamId}`);
+      const res = await fetch('/api/auth/me');
       if (res.ok) {
-        const data = await res.json();
-        setCurrentTeam(data.team);
-        setCompetition(data.competition);
+        const body = await res.json();
+        setAuthUser(body.data.user);
+        setCsrfToken(body.data.csrfToken);
+        setCompetition(body.data.competition);
+        if (body.data.competition?.remainingSeconds !== undefined) {
+          setTimeRemaining(body.data.competition.remainingSeconds);
+        }
+        if (body.data.user?.role === 'PARTICIPANT') {
+          fetchProgress();
+        }
+      } else {
+        setAuthUser(null);
+        setTeamModalOpen(true);
+      }
+    } catch (err) {
+      console.error('Error verifying auth session:', err);
+    }
+  };
 
-        if (data.competition.endTime && data.competition.status === 'running') {
-          const rem = Math.max(0, Math.floor((data.competition.endTime - Date.now()) / 1000));
-          setTimeRemaining(rem);
+  const fetchProgress = async () => {
+    try {
+      const res = await fetch('/api/me');
+      if (res.ok) {
+        const body = await res.json();
+        setDashboardData(body.data);
+        if (body.data.competition?.remainingSeconds !== undefined) {
+          setTimeRemaining(body.data.competition.remainingSeconds);
         }
       }
     } catch (err) {
-      console.error('Error fetching team info:', err);
+      console.error('Error fetching progress:', err);
     }
   };
 
   useEffect(() => {
-    fetchTeamData(currentTeamId);
-  }, [currentTeamId]);
+    checkAuth();
+  }, []);
 
   // Timer Tick
   useEffect(() => {
@@ -54,31 +75,48 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleSelectTeam = (id) => {
-    setCurrentTeamId(id);
-    fetchTeamData(id);
+  const handleLoginSuccess = (loginData) => {
+    setAuthUser(loginData.user);
+    setCsrfToken(loginData.csrfToken);
+    setCompetition(loginData.competition);
+    setTeamModalOpen(false);
+    if (loginData.user.role === 'ADMIN') {
+      setActiveTab('admin');
+    } else {
+      setActiveTab('dashboard');
+      fetchProgress();
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      // ignore
+    }
+    setAuthUser(null);
+    setDashboardData(null);
+    setTeamModalOpen(true);
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#080d1a] text-slate-100 font-sans selection:bg-indigo-500 selection:text-white">
-      
       {/* Top Navbar */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        currentTeam={currentTeam}
+        authUser={authUser}
         competition={competition}
         timeRemaining={timeRemaining}
         onOpenTeamModal={() => setTeamModalOpen(true)}
+        onLogout={handleLogout}
       />
 
       {/* Main Container */}
       <main className="flex-1 w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-10 py-8">
-        
-        {/* Deadline Alert Banner if ended */}
         {timeRemaining === 0 && (
           <div className="mb-6 p-4 rounded-xl bg-rose-950/50 border border-rose-500/50 text-rose-200 text-sm flex items-center justify-between">
-            <span className="font-bold">⏰ 90-Minute Round Deadline Reached! Submissions are now closed.</span>
+            <span className="font-bold">⏰ Competition Deadline Reached! Submissions are now closed.</span>
             <span className="badge badge-rose text-xs font-mono">Round Ended</span>
           </div>
         )}
@@ -86,41 +124,47 @@ export default function App() {
         {/* Tab Views */}
         {activeTab === 'dashboard' && (
           <ContestantDashboard
-            currentTeam={currentTeam}
-            onRefreshTeam={() => fetchTeamData(currentTeamId)}
+            authUser={authUser}
+            dashboardData={dashboardData}
+            csrfToken={csrfToken}
+            onRefreshTeam={fetchProgress}
             onOpenClueModal={() => setClueModalOpen(true)}
             onOpenBoilerplate={() => setBoilerplateOpen(true)}
+            onOpenLogin={() => setTeamModalOpen(true)}
           />
         )}
 
         {activeTab === 'leaderboard' && (
-          <Leaderboard currentTeamId={currentTeamId} />
+          <Leaderboard authUser={authUser} />
         )}
 
         {activeTab === 'admin' && (
-          <AdminPanel />
+          <AdminPanel
+            authUser={authUser}
+            csrfToken={csrfToken}
+            onOpenLogin={() => setTeamModalOpen(true)}
+          />
         )}
-
       </main>
 
       {/* Modals */}
       <BoilerplateModal
         isOpen={boilerplateOpen}
         onClose={() => setBoilerplateOpen(false)}
-        boilerplateCode={currentTeam?.boilerplate}
-        algorithmName={currentTeam?.algorithmName}
+        boilerplateCode={dashboardData?.reveal?.starterTemplate}
+        algorithmName={dashboardData?.reveal?.algorithmName}
       />
 
       <ClueDatasetModal
         isOpen={clueModalOpen}
         onClose={() => setClueModalOpen(false)}
-        teamId={currentTeam?.id}
+        unlocked={dashboardData?.stages?.anagram?.unlocked}
       />
 
       <TeamLoginModal
         isOpen={teamModalOpen}
         onClose={() => setTeamModalOpen(false)}
-        onSelectTeam={handleSelectTeam}
+        onLoginSuccess={handleLoginSuccess}
       />
 
       {/* Footer */}
@@ -130,13 +174,12 @@ export default function App() {
           <div className="flex items-center gap-4 text-[11px]">
             <span>150 Maximum Score</span>
             <span>•</span>
-            <span>4 Private Variants</span>
+            <span>Docker-Isolated Scikit-Learn Evaluator</span>
             <span>•</span>
-            <span>Isolated Evaluator</span>
+            <span>Authoritative PostgreSQL & BullMQ</span>
           </div>
         </div>
       </footer>
-
     </div>
   );
 }

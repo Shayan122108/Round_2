@@ -1,43 +1,56 @@
 import React, { useState } from 'react';
-import { X, Users, ArrowRight, ShieldCheck } from 'lucide-react';
+import { X, Lock, KeyRound, ShieldAlert } from 'lucide-react';
 
 export default function TeamLoginModal({
   isOpen,
   onClose,
-  onSelectTeam
+  onLoginSuccess
 }) {
-  const [regId, setRegId] = useState('');
+  const [regId, setRegId] = useState('REG-101');
+  const [pin, setPin] = useState('1234');
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
-  const handleManualLogin = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!regId.trim()) return;
-    onSelectTeam(regId.trim());
-    onClose();
-  };
+    if (!regId.trim() || !pin) {
+      setError('Registration ID and PIN are required.');
+      return;
+    }
+    setLoading(true);
+    setError('');
 
-  const sampleTeams = [
-    { id: 'REG-101', name: 'Neural Knights', desc: 'Variant A (All Cleared - 150 pts)' },
-    { id: 'REG-102', name: 'Gradient Gurus', desc: 'Variant B (1 Anagram Penalty - 50 pts)' },
-    { id: 'REG-103', name: 'Vector Voyagers', desc: 'Variant C (Stage 1 Qualified - 30 pts)' },
-    { id: 'REG-104', name: 'Tensor Titans', desc: 'Variant D (Stage 1 In Progress - 0 pts)' },
-    { id: 'REG-105', name: 'Deep Divers', desc: 'Variant A (2 Anagram Penalties - 0 pts)' },
-  ];
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ registrationId: regId.trim(), pin })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error?.message || 'Login failed.');
+      }
+      onLoginSuccess(data.data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
       <div className="glass-panel max-w-md w-full p-6 border-indigo-500/40 shadow-2xl animate-in fade-in zoom-in-95">
-        
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
-              <Users className="w-5 h-5" />
+              <Lock className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base font-[Outfit] text-white">Select or Login as Team</h3>
-              <p className="text-xs text-[var(--text-dim)]">Enter Registration ID or quick-switch for testing</p>
+              <h3 className="font-bold text-base font-[Outfit] text-white">Platform Sign In</h3>
+              <p className="text-xs text-[var(--text-dim)]">Enter Registration ID and PIN</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-white">
@@ -45,51 +58,61 @@ export default function TeamLoginModal({
           </button>
         </div>
 
-        {/* Manual Login */}
-        <form onSubmit={handleManualLogin} className="mb-6">
-          <label className="block text-xs font-semibold text-slate-400 mb-2">
-            Team Registration ID
-          </label>
-          <div className="flex gap-2">
+        {error && (
+          <div className="p-3 mb-4 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              Registration ID
+            </label>
             <input
               type="text"
-              placeholder="e.g. REG-101"
+              placeholder="e.g. REG-101 or ADMIN"
               value={regId}
               onChange={(e) => setRegId(e.target.value)}
-              className="flex-1 bg-slate-950/80 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono uppercase"
+              className="w-full bg-slate-950/80 border border-slate-700 rounded-lg px-3.5 py-2.5 text-xs text-white font-mono uppercase"
+              required
             />
-            <button type="submit" className="btn btn-primary text-xs !py-2 !px-3">
-              <span>Login</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              Secret PIN
+            </label>
+            <div className="relative">
+              <input
+                type="password"
+                placeholder="Enter PIN"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                className="w-full bg-slate-950/80 border border-slate-700 rounded-lg px-3.5 py-2.5 text-xs text-white font-mono pr-10"
+                required
+              />
+              <KeyRound className="w-4 h-4 text-slate-500 absolute right-3 top-3 pointer-events-none" />
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full btn btn-primary text-xs py-2.5"
+            >
+              {loading ? 'Authenticating...' : 'Sign In'}
             </button>
           </div>
         </form>
 
-        {/* Quick Switch Pre-registered Teams */}
-        <div>
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2.5">
-            Quick Switch (Demo & Pair Testing)
-          </div>
-          <div className="space-y-2">
-            {sampleTeams.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { onSelectTeam(t.id); onClose(); }}
-                className="w-full text-left p-3 rounded-xl bg-slate-900/60 hover:bg-indigo-950/40 border border-slate-800 hover:border-indigo-500/40 transition-all flex items-center justify-between group"
-              >
-                <div>
-                  <div className="font-bold text-xs text-white group-hover:text-indigo-300 font-[Outfit] flex items-center gap-1.5">
-                    <span>{t.name}</span>
-                    <span className="font-mono text-[10px] text-slate-400">({t.id})</span>
-                  </div>
-                  <div className="text-[11px] text-[var(--text-dim)]">{t.desc}</div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" />
-              </button>
-            ))}
-          </div>
+        <div className="mt-5 p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-[11px] text-[var(--text-dim)]">
+          <span className="font-semibold text-slate-400">Default Participant Accounts:</span> REG-101 through REG-105 (PIN: 1234).
+          <br />
+          <span className="font-semibold text-slate-400">Administrator:</span> Registration ID: ADMIN.
         </div>
-
       </div>
     </div>
   );

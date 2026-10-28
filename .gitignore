@@ -1,11 +1,28 @@
 # Dependencies
 node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
 
 # Build output
 client/dist/
+server/dist/
+coverage/
 
-# Runtime data
-server/uploads/*
+# Secrets / environment (NEVER commit real values)
+.env
+.env.*
+!.env.example
+
+# Private runtime storage: hidden test features, reference labels, uploaded artifacts
+server/storage/
+server/uploads/
+server/private/
+backups/
+*.joblib
+
+# Legacy runtime state (JSON store replaced by PostgreSQL; contained default PINs)
 server/data/state.json
 
 # Logs / OS / editor
@@ -15,6 +32,5 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Uncomment if this repo will be public — answer keys and private test sets are confidential
-# server/data/answer_keys/
-# server/data/datasets/variant_*/
+# NOTE: server/data/answer_keys and server/data/datasets/variant_* are ALREADY in git history of a
+# public repository and must be treated as compromised. See docs/SECURITY.md.

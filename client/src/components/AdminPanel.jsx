@@ -1,471 +1,251 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Play, Pause, RotateCcw, Save, Users, Key, Terminal, FileText, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Shield, Play, Pause, Square, RefreshCw, AlertTriangle, Users, Database, Clock } from 'lucide-react';
 
-export default function AdminPanel() {
-  const [data, setData] = useState(null);
+export default function AdminPanel({ authUser, csrfToken, onOpenLogin }) {
+  const [overview, setOverview] = useState(null);
+  const [teams, setTeams] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'variants', 'audit', 'settings'
+  const [resetConfirm, setResetConfirm] = useState('');
   const [msg, setMsg] = useState('');
-  const [newTeam, setNewTeam] = useState({ id: '', name: '', variantId: 1, pin: '1234' });
-  const [timerDuration, setTimerDuration] = useState(90);
 
-  const fetchAdminOverview = async () => {
+  if (authUser?.role !== 'ADMIN') {
+    return (
+      <div className="p-16 text-center glass-panel max-w-lg mx-auto">
+        <Shield className="w-12 h-12 text-rose-400 mx-auto mb-4" />
+        <h3 className="text-xl font-bold font-[Outfit] text-white">Administrator Access Required</h3>
+        <p className="text-xs text-[var(--text-muted)] mt-2 mb-6">
+          You must be signed in with an administrative account to access platform management.
+        </p>
+        <button onClick={onOpenLogin} className="btn btn-primary text-xs px-6 py-2.5">
+          Sign In as Admin
+        </button>
+      </div>
+    );
+  }
+
+  const fetchData = async () => {
+    setLoading(true);
     try {
-      const res = await fetch('/api/admin/overview');
-      const d = await res.json();
-      setData(d);
+      const [ovRes, teamsRes, subsRes] = await Promise.all([
+        fetch('/api/admin/overview'),
+        fetch('/api/admin/teams'),
+        fetch('/api/admin/submissions?limit=25')
+      ]);
+
+      if (ovRes.ok) {
+        const body = await ovRes.json();
+        setOverview(body.data);
+      }
+      if (teamsRes.ok) {
+        const body = await teamsRes.json();
+        setTeams(body.data || []);
+      }
+      if (subsRes.ok) {
+        const body = await subsRes.json();
+        setSubmissions(body.data || []);
+      }
     } catch (err) {
-      console.error('Failed to load admin overview:', err);
+      console.error('Failed to fetch admin data:', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAdminOverview();
+    fetchData();
   }, []);
 
-  const handleTimerAction = async (action) => {
+  const handleTimerAction = async (endpoint) => {
+    setMsg('');
     try {
-      const res = await fetch('/api/admin/timer', {
+      const res = await fetch(`/api/admin/competition/${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, durationMinutes: timerDuration })
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }
       });
-      const d = await res.json();
-      if (d.success) {
-        setMsg(`Timer ${action} successful.`);
-        fetchAdminOverview();
-        setTimeout(() => setMsg(''), 3000);
+      if (res.ok) {
+        setMsg(`Competition timer action '${endpoint}' succeeded.`);
+        fetchData();
       }
     } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleReassignVariant = async (teamId, variantId) => {
-    try {
-      const res = await fetch(`/api/admin/teams/${teamId}/reassign-variant`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variantId })
-      });
-      const d = await res.json();
-      if (d.success) {
-        setMsg(`Reassigned team ${teamId} to Variant ${variantId}.`);
-        fetchAdminOverview();
-        setTimeout(() => setMsg(''), 3000);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleCreateTeam = async (e) => {
-    e.preventDefault();
-    if (!newTeam.id || !newTeam.name) return;
-    try {
-      const res = await fetch('/api/admin/teams', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTeam)
-      });
-      const d = await res.json();
-      if (d.success) {
-        setMsg(`Team ${newTeam.name} created successfully.`);
-        setNewTeam({ id: '', name: '', variantId: 1, pin: '1234' });
-        fetchAdminOverview();
-        setTimeout(() => setMsg(''), 3000);
-      } else {
-        alert(d.error || 'Failed to create team');
-      }
-    } catch (err) {
-      console.error(err);
+      setMsg(`Action failed: ${err.message}`);
     }
   };
 
   const handleResetScores = async () => {
-    if (!window.confirm('Are you sure you want to reset all competition scores, submissions, and penalties?')) return;
+    if (resetConfirm !== 'RESET ALL SCORES') {
+      setMsg('Must type "RESET ALL SCORES" exactly to confirm reset.');
+      return;
+    }
+    setMsg('');
     try {
-      const res = await fetch('/api/admin/reset-scores', { method: 'POST' });
-      const d = await res.json();
-      if (d.success) {
-        setMsg('All competition scores reset successfully.');
-        fetchAdminOverview();
-        setTimeout(() => setMsg(''), 3000);
+      const res = await fetch('/api/admin/reset-scores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ confirm: 'RESET ALL SCORES' })
+      });
+      if (res.ok) {
+        setMsg('All competition scores and submissions have been reset.');
+        setResetConfirm('');
+        fetchData();
       }
     } catch (err) {
-      console.error(err);
+      setMsg(`Reset failed: ${err.message}`);
     }
   };
 
-  if (loading || !data) {
-    return (
-      <div className="h-64 flex flex-col items-center justify-center text-slate-400 gap-2">
-        <RefreshCw className="w-8 h-8 animate-spin text-purple-400" />
-        <span className="text-xs">Loading Admin Panel...</span>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
-      
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <span className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 font-bold flex items-center justify-center border border-purple-500/30">
-              <Shield className="w-6 h-6" />
-            </span>
-            <div>
-              <h2 className="text-2xl sm:text-3xl font-bold font-[Outfit] text-white">
-                Admin Control Center
-              </h2>
-              <p className="text-xs text-[var(--text-dim)]">
-                Confidential management of variants, team mappings, timer, metrics, and audit logs
-              </p>
-            </div>
+      {/* Top Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 glass-panel p-6">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center border border-purple-500/30">
+            <Shield className="w-6 h-6" />
+          </div>
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold font-[Outfit] text-white">
+              Event Administration & Control
+            </h2>
+            <p className="text-xs text-[var(--text-muted)]">
+              Real-time competition timer controls, queue metrics, variant assignments, and score audit
+            </p>
           </div>
         </div>
 
-        {/* Admin Navigation Tabs */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`btn text-xs !py-2 !px-3 ${
-              activeTab === 'overview' ? 'btn-primary' : 'btn-secondary text-slate-400'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>Team Mappings</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('variants')}
-            className={`btn text-xs !py-2 !px-3 ${
-              activeTab === 'variants' ? 'btn-primary' : 'btn-secondary text-slate-400'
-            }`}
-          >
-            <Key className="w-4 h-4" />
-            <span>4 Variants (Confidential)</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('audit')}
-            className={`btn text-xs !py-2 !px-3 ${
-              activeTab === 'audit' ? 'btn-primary' : 'btn-secondary text-slate-400'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>Submissions Audit ({data.submissionsCount})</span>
-          </button>
-        </div>
+        <button
+          onClick={fetchData}
+          disabled={loading}
+          className="btn btn-secondary !py-2 !px-3 text-xs flex items-center gap-1.5"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-purple-400' : ''}`} />
+          <span>Refresh State</span>
+        </button>
       </div>
 
       {msg && (
-        <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4" />
-          <span>{msg}</span>
+        <div className="p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-500/40 text-xs text-indigo-300">
+          {msg}
         </div>
       )}
 
-      {/* Timer Controls Strip */}
-      <div className="glass-panel p-5 border-purple-500/30 bg-purple-950/10">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <span className="text-xs uppercase font-bold text-purple-400 tracking-wider">Competition Clock</span>
-            <div className="flex items-center gap-3 mt-1">
-              <span className={`badge ${
-                data.competition.status === 'running' ? 'badge-emerald' : 'badge-amber'
-              }`}>
-                Status: {data.competition.status.toUpperCase()}
-              </span>
-              <span className="text-xs text-slate-400">
-                Duration: {data.competition.durationMinutes} Minutes
-              </span>
-            </div>
+      {/* Timer & Controls Card */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="glass-panel p-5 border-purple-500/30 md:col-span-2">
+          <div className="text-xs font-semibold uppercase text-purple-300 tracking-wider mb-3 flex items-center gap-2">
+            <Clock className="w-4 h-4" /> Competition Lifecycle Controls
           </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap gap-2.5">
             <button
               onClick={() => handleTimerAction('start')}
-              className="btn btn-emerald !py-2 !px-3 text-xs"
+              className="btn btn-emerald text-xs !py-2 !px-3.5 flex items-center gap-1.5"
             >
-              <Play className="w-3.5 h-3.5" /> Start
+              <Play className="w-3.5 h-3.5" /> Start / Restart (90m)
             </button>
             <button
               onClick={() => handleTimerAction('pause')}
-              className="btn btn-secondary !py-2 !px-3 text-xs"
+              className="btn btn-secondary text-xs !py-2 !px-3.5 flex items-center gap-1.5"
             >
-              <Pause className="w-3.5 h-3.5" /> Pause
+              <Pause className="w-3.5 h-3.5 text-amber-400" /> Pause
             </button>
             <button
-              onClick={() => handleTimerAction('reset')}
-              className="btn btn-secondary !py-2 !px-3 text-xs"
+              onClick={() => handleTimerAction('resume')}
+              className="btn btn-secondary text-xs !py-2 !px-3.5 flex items-center gap-1.5"
             >
-              <RotateCcw className="w-3.5 h-3.5" /> Reset (90m)
+              <Play className="w-3.5 h-3.5 text-cyan-400" /> Resume
             </button>
             <button
-              onClick={handleResetScores}
-              className="btn btn-danger !py-2 !px-3 text-xs ml-2"
+              onClick={() => handleTimerAction('end')}
+              className="btn btn-danger text-xs !py-2 !px-3.5 flex items-center gap-1.5"
             >
-              Reset Scores
+              <Square className="w-3.5 h-3.5" /> End Round
             </button>
+          </div>
+        </div>
+
+        {/* Queue Stats */}
+        <div className="glass-panel p-5 border-slate-800">
+          <div className="text-xs font-semibold uppercase text-[var(--text-dim)] tracking-wider mb-2 flex items-center gap-2">
+            <Database className="w-4 h-4 text-cyan-400" /> BullMQ Queue
+          </div>
+          <div className="space-y-1 font-mono text-xs">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Waiting:</span>
+              <span className="text-white font-bold">{overview?.queue?.waiting || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Active (Running):</span>
+              <span className="text-cyan-400 font-bold">{overview?.queue?.active || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Completed:</span>
+              <span className="text-emerald-400 font-bold">{overview?.queue?.completed || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Failed:</span>
+              <span className="text-rose-400 font-bold">{overview?.queue?.failed || 0}</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Tab 1: Confidential Team Mappings */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
-          <div className="glass-panel overflow-hidden border-slate-800">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-white text-base">Team Variant Assignments (Confidential)</h3>
-                <p className="text-xs text-[var(--text-dim)]">
-                  Strictly hidden from contestant dashboards. Contestants only discover algorithm through anagram.
-                </p>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] border-b border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4">Reg ID</th>
-                    <th className="py-3 px-4">Team Name</th>
-                    <th className="py-3 px-4">Assigned Variant</th>
-                    <th className="py-3 px-4">Hidden Algorithm</th>
-                    <th className="py-3 px-4">Letters</th>
-                    <th className="py-3 px-4 text-center">Stage 1</th>
-                    <th className="py-3 px-4 text-center">Anagram</th>
-                    <th className="py-3 px-4 text-center">Stage 2</th>
-                    <th className="py-3 px-4 text-right">Score</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {data.teams.map((t) => (
-                    <tr key={t.id} className="hover:bg-slate-800/30">
-                      <td className="py-3 px-4 font-bold text-indigo-300">{t.id}</td>
-                      <td className="py-3 px-4 font-semibold text-white font-[Outfit]">{t.name}</td>
-                      <td className="py-3 px-4">
-                        <select
-                          value={t.variantId}
-                          onChange={(e) => handleReassignVariant(t.id, e.target.value)}
-                          className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-indigo-300 font-bold outline-none"
-                        >
-                          <option value={1}>Variant A (1)</option>
-                          <option value={2}>Variant B (2)</option>
-                          <option value={3}>Variant C (3)</option>
-                          <option value={4}>Variant D (4)</option>
-                        </select>
-                      </td>
-                      <td className="py-3 px-4 font-bold text-purple-300">{t.hiddenAlgorithm}</td>
-                      <td className="py-3 px-4 text-[10px] text-slate-400 tracking-widest">{t.shuffledLetters}</td>
-                      <td className="py-3 px-4 text-center">
-                        {t.stage1Qualified ? <span className="text-emerald-400 font-bold">Pass</span> : <span className="text-slate-600">-</span>}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        {t.anagramSolved ? <span className="text-emerald-400 font-bold">Solved</span> : <span className="text-slate-600">-</span>}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        {t.stage2Qualified ? <span className="text-emerald-400 font-bold">Pass</span> : <span className="text-slate-600">-</span>}
-                      </td>
-                      <td className="py-3 px-4 text-right font-bold text-white">{t.totalScore} pts</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Add Team Card */}
-          <div className="glass-card p-5 border-slate-800">
-            <h4 className="font-bold text-sm text-white mb-3">Register New Team</h4>
-            <form onSubmit={handleCreateTeam} className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-              <input
-                type="text"
-                placeholder="ID (e.g. REG-106)"
-                value={newTeam.id}
-                onChange={(e) => setNewTeam({ ...newTeam, id: e.target.value })}
-                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Team Name"
-                value={newTeam.name}
-                onChange={(e) => setNewTeam({ ...newTeam, name: e.target.value })}
-                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white sm:col-span-2"
-                required
-              />
-              <select
-                value={newTeam.variantId}
-                onChange={(e) => setNewTeam({ ...newTeam, variantId: parseInt(e.target.value, 10) })}
-                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
-              >
-                <option value={1}>Variant A (Random Forest)</option>
-                <option value={2}>Variant B (Decision Tree)</option>
-                <option value={3}>Variant C (Naive Bayes)</option>
-                <option value={4}>Variant D (Gradient Boosting)</option>
-              </select>
-              <button type="submit" className="btn btn-primary text-xs">
-                Add Team
-              </button>
-            </form>
-          </div>
+      {/* Teams & Variant Configurations */}
+      <div className="glass-panel p-6">
+        <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
+          <Users className="w-4 h-4 text-indigo-400" /> Registered Participant Teams ({teams.length})
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-950 text-slate-400 font-mono uppercase border-b border-slate-800">
+              <tr>
+                <th className="py-2.5 px-3">Team</th>
+                <th className="py-2.5 px-3">Assigned Variant</th>
+                <th className="py-2.5 px-3">Stage 1</th>
+                <th className="py-2.5 px-3">Anagram</th>
+                <th className="py-2.5 px-3">Stage 2</th>
+                <th className="py-2.5 px-3 text-right">Total Score</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 font-mono">
+              {teams.map((t) => (
+                <tr key={t.id} className="hover:bg-slate-800/30">
+                  <td className="py-3 px-3 font-sans font-semibold text-white">{t.name}</td>
+                  <td className="py-3 px-3 text-purple-300">{t.variantLabel}</td>
+                  <td className="py-3 px-3 text-slate-300">{t.progress?.stage1Points || 0} pts</td>
+                  <td className="py-3 px-3 text-slate-300">{t.progress?.anagramPoints || 0} pts</td>
+                  <td className="py-3 px-3 text-slate-300">{t.progress?.stage2Points || 0} pts</td>
+                  <td className="py-3 px-3 text-right font-bold text-indigo-400">{t.progress?.totalScore || 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
 
-      {/* Tab 2: Four Private Variants Configuration */}
-      {activeTab === 'variants' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {Object.values(data.variants).map((v) => (
-            <div key={v.id} className="glass-panel p-6 border-indigo-500/30 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="badge badge-indigo">{v.label}</span>
-                  <h3 className="font-bold text-lg text-white font-[Outfit]">{v.hiddenModel}</h3>
-                </div>
-                <span className="font-mono text-xs text-slate-400">Variant #{v.id}</span>
-              </div>
-
-              <div>
-                <span className="text-[10px] uppercase font-semibold text-slate-400">Shuffled Letters:</span>
-                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 font-mono font-bold tracking-widest text-indigo-300 mt-1 text-sm">
-                  {v.shuffledLetters}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase">Stage 1 Target</span>
-                  <div className="font-mono font-bold text-white mt-1">
-                    {(v.targetAccuracyStage1 * 100).toFixed(0)}% Accuracy
-                  </div>
-                </div>
-                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase">Stage 2 Benchmark</span>
-                  <div className="font-mono font-bold text-cyan-300 mt-1">
-                    Acc &gt;= {(v.stage2Config.targetAccuracy * 100).toFixed(0)}% | F1 &gt;= {(v.stage2Config.targetF1 * 100).toFixed(0)}%
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[10px] uppercase font-semibold text-slate-400">Boilerplate Preview:</span>
-                <pre className="bg-[#070b14] p-3 rounded-lg text-[10px] font-mono text-slate-300 h-28 overflow-y-auto mt-1 border border-slate-800">
-                  {v.boilerplate}
-                </pre>
-              </div>
-            </div>
-          ))}
+      {/* Danger Zone */}
+      <div className="glass-panel p-6 border-rose-500/30 bg-rose-950/10">
+        <div className="flex items-center gap-2.5 text-rose-400 font-bold text-sm mb-2">
+          <AlertTriangle className="w-5 h-5" /> Danger Zone: Reset Competition Scores
         </div>
-      )}
-
-      {/* Tab 3: Submissions & Anagram Audit Trail */}
-      {activeTab === 'audit' && (
-        <div className="space-y-6">
-          <div className="glass-panel overflow-hidden border-slate-800">
-            <div className="p-4 border-b border-slate-800">
-              <h3 className="font-bold text-white text-base">Live Submission Audit Trail</h3>
-              <p className="text-xs text-[var(--text-dim)]">
-                Every model evaluation attempt logged with server timestamp, metrics, and error reasons.
-              </p>
-            </div>
-            <div className="overflow-x-auto max-h-96">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] sticky top-0 border-b border-slate-800">
-                  <tr>
-                    <th className="py-2.5 px-3">Timestamp</th>
-                    <th className="py-2.5 px-3">Team</th>
-                    <th className="py-2.5 px-3">Stage</th>
-                    <th className="py-2.5 px-3">Filename</th>
-                    <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3">Metrics / Details</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {data.recentSubmissions.map((s) => (
-                    <tr key={s.id} className="hover:bg-slate-800/30">
-                      <td className="py-2.5 px-3 text-[var(--text-dim)]">
-                        {new Date(s.timestamp).toLocaleTimeString()}
-                      </td>
-                      <td className="py-2.5 px-3 font-semibold text-white">{s.teamName}</td>
-                      <td className="py-2.5 px-3">Stage {s.stage}</td>
-                      <td className="py-2.5 px-3 text-slate-400">{s.filename}</td>
-                      <td className="py-2.5 px-3">
-                        <span className={`badge ${
-                          s.status === 'QUALIFIED'
-                            ? 'badge-emerald'
-                            : s.status === 'NOT_QUALIFIED'
-                            ? 'badge-amber'
-                            : 'badge-rose'
-                        }`}>
-                          {s.status}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-300">
-                        {s.metrics
-                          ? `Acc: ${(s.metrics.accuracy * 100).toFixed(1)}% (${s.metrics.correctCount}/${s.metrics.totalCount})`
-                          : s.error || '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Anagram Guess Log */}
-          <div className="glass-panel overflow-hidden border-slate-800">
-            <div className="p-4 border-b border-slate-800">
-              <h3 className="font-bold text-white text-base">Anagram Guess History & Penalties</h3>
-              <p className="text-xs text-[var(--text-dim)]">
-                Tracks each guess, penalties applied (-30 pts), and points awarded (+50 pts).
-              </p>
-            </div>
-            <div className="overflow-x-auto max-h-60">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] sticky top-0 border-b border-slate-800">
-                  <tr>
-                    <th className="py-2.5 px-3">Time</th>
-                    <th className="py-2.5 px-3">Team</th>
-                    <th className="py-2.5 px-3">Guess</th>
-                    <th className="py-2.5 px-3">Result</th>
-                    <th className="py-2.5 px-3">Score Effect</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {data.anagramAudit.map((a, i) => (
-                    <tr key={i} className="hover:bg-slate-800/30">
-                      <td className="py-2.5 px-3 text-[var(--text-dim)]">
-                        {new Date(a.timestamp).toLocaleTimeString()}
-                      </td>
-                      <td className="py-2.5 px-3 font-semibold text-white">{a.teamName}</td>
-                      <td className="py-2.5 px-3 font-bold text-indigo-300">{a.guess}</td>
-                      <td className="py-2.5 px-3">
-                        {a.isCorrect ? (
-                          <span className="text-emerald-400 font-bold">CORRECT</span>
-                        ) : (
-                          <span className="text-rose-400 font-bold">WRONG</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 font-bold">
-                        {a.isCorrect ? (
-                          <span className="text-emerald-400">+50 Points</span>
-                        ) : (
-                          <span className="text-rose-400">-30 Points Penalty</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        <p className="text-xs text-[var(--text-muted)] mb-4 max-w-xl">
+          Permanently wipes all submissions, resets participant scores to 0, deletes stored joblib artifacts, and resets stage milestones.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <input
+            type="text"
+            placeholder='Type "RESET ALL SCORES" to confirm'
+            value={resetConfirm}
+            onChange={(e) => setResetConfirm(e.target.value)}
+            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono uppercase"
+          />
+          <button
+            onClick={handleResetScores}
+            disabled={resetConfirm !== 'RESET ALL SCORES'}
+            className="btn btn-danger text-xs !py-2 !px-4"
+          >
+            Confirm & Reset All Scores
+          </button>
         </div>
-      )}
-
+      </div>
     </div>
   );
 }
