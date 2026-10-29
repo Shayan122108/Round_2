@@ -42,7 +42,7 @@ describe('Auth & API Access Security Tests', () => {
   it('rejects invalid credentials', async () => {
     const res = await request(app)
       .post('/api/auth/login')
-      .send({ registrationId: 'REG-101', pin: 'wrong-pin' });
+      .send({ registrationId: 'ADMIN', pin: 'wrong-pin' });
 
     expect(res.status).toBe(401);
     expect(res.body.error?.code).toBe('INVALID_CREDENTIALS');

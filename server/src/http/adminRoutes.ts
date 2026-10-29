@@ -1,245 +1,628 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { HttpError, hashPin, requireAdmin } from '../auth/auth.js';
+import { HttpError, requireAdmin } from '../auth/auth.js';
 import { ok, parse } from './util.js';
 import {
   endCompetition, getCompetition, pauseCompetition, publicCompetition, resumeCompetition, startCompetition,
 } from '../services/competition.js';
 import { audit } from '../services/audit.js';
-import { recomputeTeam } from '../services/scoring.js';
-import { enqueueSubmission, queueStats } from '../services/queue.js';
-import { buildLeaderboard } from './playerRoutes.js';
-import { safeUnlink } from '../services/storage.js';
 
 export const adminRouter = Router();
-adminRouter.use(requireAdmin); // every /api/admin/* route is gated server-side
+adminRouter.use(requireAdmin); // Every /api/admin/* route requires authenticated admin role
 
-const idParam = z.string().uuid();
-
+// ---------- Overview & Dashboard Stats ----------
 adminRouter.get('/overview', async (_req, res) => {
-  const [teams, users, subs, byStatus, comp, q, recentFailed, durations] = await Promise.all([
-    prisma.team.count(), prisma.user.count({ where: { role: 'PARTICIPANT' } }), prisma.submission.count(),
-    prisma.submission.groupBy({ by: ['status'], _count: true }),
+  const [
+    totalParticipants,
+    pendingR1,
+    pendingR3,
+    r1Approved,
+    r2Solved,
+    r3Approved,
+    comp,
+    benchmark,
+  ] = await Promise.all([
+    prisma.user.count({ where: { role: 'PARTICIPANT' } }),
+    prisma.user.count({ where: { role: 'PARTICIPANT', round1Status: 'PENDING_VERIFICATION' } }),
+    prisma.user.count({ where: { role: 'PARTICIPANT', round3Status: 'PENDING_VERIFICATION' } }),
+    prisma.user.count({ where: { role: 'PARTICIPANT', round1Status: 'APPROVED' } }),
+    prisma.user.count({ where: { role: 'PARTICIPANT', round2Status: 'SOLVED' } }),
+    prisma.user.count({ where: { role: 'PARTICIPANT', round3Status: 'APPROVED' } }),
     getCompetition(),
-    queueStats().catch(() => null),
-    prisma.submission.findMany({ where: { status: 'FAILED' }, orderBy: { completedAt: 'desc' }, take: 10, include: { result: true, team: { select: { name: true } } } }),
-    prisma.evaluationResult.aggregate({ _avg: { durationMs: true }, _max: { durationMs: true } }),
+    prisma.benchmarkConfig.findUnique({ where: { id: 1 } }),
   ]);
-  const board = await buildLeaderboard();
-  const funnel = { stage1: board.filter((b) => b.stage1).length, anagram: board.filter((b) => b.anagram).length, stage2: board.filter((b) => b.stage2).length };
+
   ok(res, {
     competition: publicCompetition(comp),
-    counts: { teams, participants: users, submissions: subs },
-    submissionsByStatus: Object.fromEntries(byStatus.map((s) => [s.status, s._count])),
-    queue: q,
-    evaluation: { avgDurationMs: Math.round(durations._avg.durationMs ?? 0), maxDurationMs: durations._max.durationMs ?? 0 },
-    funnel,
-    scoreDistribution: board.map((b) => b.totalScore),
-    recentFailures: recentFailed.map((f) => ({ id: f.id, team: f.team.name, stage: f.stage, errorCode: f.result?.errorCode ?? null, at: f.completedAt })),
+    counts: {
+      totalParticipants,
+      pendingVerifications: pendingR1 + pendingR3,
+      pendingRound1: pendingR1,
+      pendingRound3: pendingR3,
+      round1Approved: r1Approved,
+      round2Solved: r2Solved,
+      round3Approved: r3Approved,
+    },
+    benchmarks: benchmark,
   });
 });
 
-// ---------- teams / users ----------
-adminRouter.get('/teams', async (_req, res) => {
-  const teams = await prisma.team.findMany({ include: { members: { select: { id: true, registrationId: true, displayName: true } }, progress: true, variant: { select: { id: true, label: true } } }, orderBy: { name: 'asc' } });
-  ok(res, teams.map((t) => ({
-    id: t.id, name: t.name, variantId: t.variantId, variantLabel: t.variant.label, scoreAdjustment: t.scoreAdjustment,
-    members: t.members, progress: t.progress,
+// ---------- Pending Verifications Queue ----------
+adminRouter.get('/pending-verifications', async (_req, res) => {
+  const participants = await prisma.user.findMany({
+    where: {
+      role: 'PARTICIPANT',
+      OR: [
+        { round1Status: 'PENDING_VERIFICATION' },
+        { round3Status: 'PENDING_VERIFICATION' },
+      ],
+    },
+    include: { variant: true },
+    orderBy: { updatedAt: 'asc' },
+  });
+
+  const queue = participants.map((p) => {
+    const roundAwaiting = p.round1Status === 'PENDING_VERIFICATION' ? 1 : 3;
+    return {
+      userId: p.id,
+      registrationId: p.registrationId,
+      webId: `WEB-${String(p.webId).padStart(3, '0')}`,
+      numericWebId: p.webId,
+      round: roundAwaiting,
+      currentScore: p.totalScore,
+      variantName: p.variant?.hiddenModel ?? 'Unassigned',
+      variantLabel: p.variant?.label ?? '',
+      round1Status: p.round1Status,
+      round2Status: p.round2Status,
+      round3Status: p.round3Status,
+      round3BoilerplateReleased: p.round3BoilerplateReleased,
+      requestedAt: p.updatedAt,
+    };
+  });
+
+  ok(res, queue);
+});
+
+// ---------- All Participants & Search ----------
+adminRouter.get('/participants', async (req, res) => {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+  const where: any = { role: 'PARTICIPANT' };
+  if (search) {
+    // Check if search is numeric web_id
+    const num = Number.parseInt(search.replace(/[^0-9]/g, ''), 10);
+    where.OR = [
+      { registrationId: { contains: search, mode: 'insensitive' } },
+      { displayName: { contains: search, mode: 'insensitive' } },
+      ...(Number.isFinite(num) ? [{ webId: num }] : []),
+    ];
+  }
+
+  const participants = await prisma.user.findMany({
+    where,
+    include: { variant: true },
+    orderBy: { webId: 'asc' },
+    take: 100,
+  });
+
+  ok(res, participants.map((p) => ({
+    id: p.id,
+    registrationId: p.registrationId,
+    webId: `WEB-${String(p.webId).padStart(3, '0')}`,
+    numericWebId: p.webId,
+    displayName: p.displayName,
+    totalScore: p.totalScore,
+    variantId: p.variantId,
+    variantLabel: p.variant?.label ?? null,
+    hiddenModel: p.variant?.hiddenModel ?? null,
+    round1Status: p.round1Status,
+    round1Points: p.round1Points,
+    round2Status: p.round2Status,
+    round2Points: p.round2Points,
+    round3Status: p.round3Status,
+    round3Points: p.round3Points,
+    round3BoilerplateReleased: p.round3BoilerplateReleased,
   })));
 });
 
-const teamCreate = z.object({
-  name: z.string().trim().min(2).max(60),
-  variantId: z.number().int().min(1).max(99),
-  members: z.array(z.object({
-    registrationId: z.string().trim().min(1).max(64),
-    displayName: z.string().trim().min(1).max(80),
-    pin: z.string().min(6).max(128),
-  })).max(10).default([]),
-}).strict();
+// ---------- Participant Detail View ----------
+adminRouter.get('/participants/:id', async (req, res) => {
+  const id = req.params.id;
 
-adminRouter.post('/teams', async (req, res) => {
-  const b = parse(teamCreate, req.body);
-  const variant = await prisma.variant.findUnique({ where: { id: b.variantId } });
-  if (!variant?.enabled) throw new HttpError(400, 'BAD_VARIANT', 'Unknown or disabled variant.');
-  const hashes = await Promise.all(b.members.map((m) => hashPin(m.pin)));
-  try {
-    const team = await prisma.$transaction(async (tx) => {
-      const t = await tx.team.create({ data: { name: b.name, variantId: b.variantId, progress: { create: {} } } });
-      for (const [i, m] of b.members.entries())
-        await tx.user.create({ data: { registrationId: m.registrationId.toUpperCase(), displayName: m.displayName, pinHash: hashes[i]!, teamId: t.id } });
-      await audit(req.user!.id, 'TEAM_CREATED', t.id, { name: b.name, variantId: b.variantId, members: b.members.map((m) => m.registrationId) }, tx);
-      return t;
-    });
-    ok(res, { id: team.id, name: team.name }, 201);
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new HttpError(409, 'DUPLICATE', 'Team name or registration ID already exists.');
-    throw e;
+  const [user, benchmark, decisions, audits] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id },
+      include: { variant: true },
+    }),
+    prisma.benchmarkConfig.findUnique({ where: { id: 1 } }),
+    prisma.decisionHistory.findMany({
+      where: { userId: id },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.auditLog.findMany({
+      where: { target: id },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    }),
+  ]);
+
+  if (!user) {
+    throw new HttpError(404, 'NOT_FOUND', 'Participant not found.');
   }
+
+  ok(res, {
+    participant: {
+      id: user.id,
+      registrationId: user.registrationId,
+      webId: `WEB-${String(user.webId).padStart(3, '0')}`,
+      numericWebId: user.webId,
+      displayName: user.displayName,
+      totalScore: user.totalScore,
+      round1: {
+        status: user.round1Status,
+        points: user.round1Points,
+        approvedAt: user.round1ApprovedAt,
+        approvedBy: user.round1ApprovedBy,
+        rejectionReason: user.round1RejectionReason,
+      },
+      round2: {
+        status: user.round2Status,
+        points: user.round2Points,
+        solvedAt: user.round2SolvedAt,
+        attempts: user.round2Attempts,
+      },
+      round3: {
+        status: user.round3Status,
+        points: user.round3Points,
+        boilerplateReleased: user.round3BoilerplateReleased,
+        boilerplateReleasedAt: user.round3BoilerplateReleasedAt,
+        boilerplateReleasedBy: user.round3BoilerplateReleasedBy,
+        approvedAt: user.round3ApprovedAt,
+        approvedBy: user.round3ApprovedBy,
+        rejectionReason: user.round3RejectionReason,
+      },
+      variant: user.variant ? {
+        id: user.variant.id,
+        label: user.variant.label,
+        hiddenModel: user.variant.hiddenModel,
+        estimator: user.variant.estimator,
+      } : null,
+      referenceMetrics: {
+        round1: {
+          mae: benchmark?.round1Mae ?? 1.25,
+          rmse: benchmark?.round1Rmse ?? 1.85,
+          mse: benchmark?.round1Mse ?? 3.42,
+        },
+        round3: user.variant ? {
+          mae: user.variant.round3Mae,
+          rmse: user.variant.round3Rmse,
+          mse: user.variant.round3Mse,
+        } : null,
+      },
+      decisions,
+      audits,
+    },
+  });
 });
 
-const teamPatch = z.object({
-  name: z.string().trim().min(2).max(60).optional(),
-  scoreAdjustment: z.number().int().min(-150).max(150).optional(),
-  reason: z.string().trim().min(3).max(300).optional(),
+// ---------- Manual Review Controls (Approve / Reject) ----------
+const reviewSchema = z.object({
+  round: z.union([z.literal(1), z.literal(3)]),
+  action: z.enum(['APPROVE', 'REJECT']),
+  reason: z.string().trim().max(300).optional().default(''),
 }).strict();
 
-adminRouter.patch('/teams/:id', async (req, res) => {
-  const id = parse(idParam, req.params.id);
-  const b = parse(teamPatch, req.body);
-  if (b.scoreAdjustment !== undefined && !b.reason) throw new HttpError(400, 'REASON_REQUIRED', 'A reason is required for score corrections.');
-  const out = await prisma.$transaction(async (tx) => {
-    const before = await tx.team.findUnique({ where: { id } });
-    if (!before) throw new HttpError(404, 'NOT_FOUND', 'Team not found.');
-    const t = await tx.team.update({ where: { id }, data: { name: b.name, scoreAdjustment: b.scoreAdjustment } });
-    const prog = await recomputeTeam(tx, id);
-    await audit(req.user!.id, b.scoreAdjustment !== undefined ? 'SCORE_ADJUSTED' : 'TEAM_UPDATED', id, { before: { name: before.name, adj: before.scoreAdjustment }, after: { name: t.name, adj: t.scoreAdjustment }, reason: b.reason }, tx);
-    return { team: t, totalScore: prog.totalScore };
+adminRouter.post('/participants/:id/review', async (req, res) => {
+  const id = req.params.id;
+  const { round, action, reason } = parse(reviewSchema, req.body);
+  const adminUser = req.user!;
+
+  const result = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({
+      where: { id },
+      include: { variant: true },
+    });
+
+    if (!user) {
+      throw new HttpError(404, 'NOT_FOUND', 'Participant not found.');
+    }
+
+    if (round === 1) {
+      if (action === 'APPROVE') {
+        if (user.round1Status === 'APPROVED') {
+          throw new HttpError(400, 'ALREADY_APPROVED', 'Round 1 has already been approved.');
+        }
+
+        const newScore = Math.min(150, 30 + user.round2Points + user.round3Points);
+        const updated = await tx.user.update({
+          where: { id },
+          data: {
+            round1Status: 'APPROVED',
+            round1Points: 30,
+            round1ApprovedAt: new Date(),
+            round1ApprovedBy: adminUser.displayName || adminUser.registrationId,
+            round1RejectionReason: null,
+            round2Status: user.round2Status === 'LOCKED' ? 'IN_PROGRESS' : user.round2Status,
+            totalScore: newScore,
+            lastScoreAt: new Date(),
+          },
+        });
+
+        await tx.decisionHistory.create({
+          data: {
+            userId: id,
+            round: 1,
+            action: 'APPROVE',
+            points: 30,
+            reason: reason || 'Verified against admin reference metrics in person.',
+            adminId: adminUser.id,
+            adminName: adminUser.displayName || adminUser.registrationId,
+          },
+        });
+
+        await audit(adminUser.id, 'ROUND_1_APPROVED', id, {
+          registrationId: user.registrationId,
+          pointsAwarded: 30,
+          newTotalScore: newScore,
+        }, tx);
+
+        return { updated, message: 'Round 1 approved. 30 points awarded and Round 2 unlocked.' };
+      } else {
+        // REJECT
+        const updated = await tx.user.update({
+          where: { id },
+          data: {
+            round1Status: 'REJECTED',
+            round1RejectionReason: reason || 'Metrics did not match reference standards.',
+          },
+        });
+
+        await tx.decisionHistory.create({
+          data: {
+            userId: id,
+            round: 1,
+            action: 'REJECT',
+            points: 0,
+            reason: reason || 'Metrics rejected upon manual inspection.',
+            adminId: adminUser.id,
+            adminName: adminUser.displayName || adminUser.registrationId,
+          },
+        });
+
+        await audit(adminUser.id, 'ROUND_1_REJECTED', id, {
+          registrationId: user.registrationId,
+          reason,
+        }, tx);
+
+        return { updated, message: 'Round 1 rejected. No points awarded.' };
+      }
+    } else {
+      // Round 3 Review
+      if (user.round2Status !== 'SOLVED') {
+        throw new HttpError(403, 'ROUND2_REQUIRED', 'Round 2 must be solved before Round 3 can be evaluated.');
+      }
+
+      if (action === 'APPROVE') {
+        if (user.round3Status === 'APPROVED') {
+          throw new HttpError(400, 'ALREADY_APPROVED', 'Round 3 has already been approved.');
+        }
+
+        const newScore = Math.min(150, user.round1Points + user.round2Points + 70);
+        const updated = await tx.user.update({
+          where: { id },
+          data: {
+            round3Status: 'APPROVED',
+            round3Points: 70,
+            round3ApprovedAt: new Date(),
+            round3ApprovedBy: adminUser.displayName || adminUser.registrationId,
+            round3RejectionReason: null,
+            totalScore: newScore,
+            lastScoreAt: new Date(),
+          },
+        });
+
+        await tx.decisionHistory.create({
+          data: {
+            userId: id,
+            round: 3,
+            action: 'APPROVE',
+            points: 70,
+            reason: reason || 'Model verified against variant reference metrics.',
+            adminId: adminUser.id,
+            adminName: adminUser.displayName || adminUser.registrationId,
+          },
+        });
+
+        await audit(adminUser.id, 'ROUND_3_APPROVED', id, {
+          registrationId: user.registrationId,
+          variantId: user.variantId,
+          pointsAwarded: 70,
+          newTotalScore: newScore,
+        }, tx);
+
+        return { updated, message: 'Round 3 approved! 70 points awarded. Competition completed.' };
+      } else {
+        // REJECT
+        const updated = await tx.user.update({
+          where: { id },
+          data: {
+            round3Status: 'REJECTED',
+            round3RejectionReason: reason || 'Metrics did not meet required thresholds.',
+          },
+        });
+
+        await tx.decisionHistory.create({
+          data: {
+            userId: id,
+            round: 3,
+            action: 'REJECT',
+            points: 0,
+            reason: reason || 'Metrics rejected upon manual inspection.',
+            adminId: adminUser.id,
+            adminName: adminUser.displayName || adminUser.registrationId,
+          },
+        });
+
+        await audit(adminUser.id, 'ROUND_3_REJECTED', id, {
+          registrationId: user.registrationId,
+          reason,
+        }, tx);
+
+        return { updated, message: 'Round 3 rejected. No points awarded.' };
+      }
+    }
   });
-  ok(res, { id, name: out.team.name, scoreAdjustment: out.team.scoreAdjustment, totalScore: out.totalScore });
+
+  ok(res, result);
 });
 
-const reassign = z.object({ variantId: z.number().int().min(1).max(99), force: z.boolean().default(false) }).strict();
+// ---------- Release Round 3 Boilerplate ----------
+adminRouter.post('/participants/:id/release-boilerplate', async (req, res) => {
+  const id = req.params.id;
+  const adminUser = req.user!;
 
-adminRouter.post('/teams/:id/reassign-variant', async (req, res) => {
-  const id = parse(idParam, req.params.id);
-  const b = parse(reassign, req.body);
-  await prisma.$transaction(async (tx) => {
-    const team = await tx.team.findUnique({ where: { id }, include: { progress: true } });
-    if (!team) throw new HttpError(404, 'NOT_FOUND', 'Team not found.');
-    const v = await tx.variant.findUnique({ where: { id: b.variantId } });
-    if (!v?.enabled) throw new HttpError(400, 'BAD_VARIANT', 'Unknown or disabled variant.');
-    const hasProgress = !!(team.progress?.stage1QualifiedAt || team.progress?.anagramSolvedAt);
-    if (hasProgress && !b.force) throw new HttpError(409, 'HAS_PROGRESS', 'Team already has progress; pass force=true to reassign.');
-    await tx.team.update({ where: { id }, data: { variantId: b.variantId } });
-    await audit(req.user!.id, 'VARIANT_REASSIGNED', id, { from: team.variantId, to: b.variantId, force: b.force }, tx);
+  const result = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({
+      where: { id },
+      include: { variant: true },
+    });
+
+    if (!user) {
+      throw new HttpError(404, 'NOT_FOUND', 'Participant not found.');
+    }
+
+    if (user.round2Status !== 'SOLVED') {
+      throw new HttpError(400, 'ROUND2_NOT_SOLVED', 'Participant must solve Round 2 before Round 3 boilerplate can be released.');
+    }
+
+    if (user.round3BoilerplateReleased) {
+      return { user, message: 'Boilerplate was already released for this participant.' };
+    }
+
+    const updated = await tx.user.update({
+      where: { id },
+      data: {
+        round3BoilerplateReleased: true,
+        round3BoilerplateReleasedAt: new Date(),
+        round3BoilerplateReleasedBy: adminUser.displayName || adminUser.registrationId,
+        round3Status: user.round3Status === 'AWAITING_RELEASE' ? 'READY' : user.round3Status,
+      },
+    });
+
+    await audit(adminUser.id, 'ROUND3_BOILERPLATE_RELEASED', id, {
+      registrationId: user.registrationId,
+      variantId: user.variantId,
+    }, tx);
+
+    return { user: updated, message: `Round 3 boilerplate released for ${user.registrationId}.` };
   });
-  ok(res, { id, variantId: b.variantId });
+
+  ok(res, result);
 });
 
-adminRouter.get('/variants', async (_req, res) => {
-  const vs = await prisma.variant.findMany({ orderBy: { id: 'asc' }, select: { id: true, label: true, hiddenModel: true, shuffledLetters: true, estimator: true, stage1MinAccuracy: true, stage2MinAccuracy: true, stage2MinMacroF1: true, enabled: true } });
-  ok(res, vs);
+// ---------- Admin Benchmark Management ----------
+adminRouter.get('/benchmarks', async (_req, res) => {
+  const [r1Benchmark, variants] = await Promise.all([
+    prisma.benchmarkConfig.findUnique({ where: { id: 1 } }),
+    prisma.variant.findMany({
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        label: true,
+        hiddenModel: true,
+        estimator: true,
+        round3Mae: true,
+        round3Rmse: true,
+        round3Mse: true,
+      },
+    }),
+  ]);
+
+  ok(res, {
+    round1: r1Benchmark,
+    variants,
+  });
 });
 
-const variantPatch = z.object({
-  stage1MinAccuracy: z.number().min(0).max(1).optional(),
-  stage2MinAccuracy: z.number().min(0).max(1).optional(),
-  stage2MinMacroF1: z.number().min(0).max(1).optional(),
-  enabled: z.boolean().optional(),
+const benchmarkUpdateSchema = z.object({
+  round1: z.object({
+    mae: z.number().min(0),
+    rmse: z.number().min(0),
+    mse: z.number().min(0),
+  }).optional(),
+  variants: z.array(z.object({
+    id: z.number().int().min(1).max(4),
+    mae: z.number().min(0),
+    rmse: z.number().min(0),
+    mse: z.number().min(0),
+  })).optional(),
 }).strict();
 
-adminRouter.patch('/variants/:id', async (req, res) => {
-  const id = parse(z.coerce.number().int(), req.params.id);
-  const b = parse(variantPatch, req.body);
-  const v = await prisma.variant.update({ where: { id }, data: b }).catch(() => { throw new HttpError(404, 'NOT_FOUND', 'Variant not found.'); });
-  await audit(req.user!.id, 'VARIANT_UPDATED', String(id), b);
-  ok(res, { id: v.id });
-});
+adminRouter.put('/benchmarks', async (req, res) => {
+  const { round1, variants } = parse(benchmarkUpdateSchema, req.body);
+  const adminUser = req.user!;
 
-// ---------- submissions ----------
-adminRouter.get('/submissions', async (req, res) => {
-  const q = parse(z.object({
-    status: z.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']).optional(),
-    stage: z.coerce.number().int().min(1).max(2).optional(),
-    teamId: z.string().uuid().optional(),
-    limit: z.coerce.number().int().min(1).max(200).default(50),
-  }), req.query);
-  const rows = await prisma.submission.findMany({
-    where: { status: q.status, stage: q.stage, teamId: q.teamId }, orderBy: { queuedAt: 'desc' }, take: q.limit,
-    include: { result: true, team: { select: { name: true, variantId: true } } },
-  });
-  ok(res, rows.map((s) => ({ id: s.id, team: s.team.name, variantId: s.team.variantId, stage: s.stage, status: s.status, attempts: s.attempts, queuedAt: s.queuedAt, startedAt: s.startedAt, completedAt: s.completedAt, sizeBytes: s.sizeBytes, sha256: s.sha256, result: s.result })));
-});
-
-adminRouter.get('/submissions/:id', async (req, res) => {
-  const id = parse(idParam, req.params.id);
-  const s = await prisma.submission.findUnique({ where: { id }, include: { result: true, team: { select: { name: true, variantId: true } } } });
-  if (!s) throw new HttpError(404, 'NOT_FOUND', 'Submission not found.');
-  const { artifactPath: _p, ...safe } = s; // server file paths never leave the API
-  ok(res, safe);
-});
-
-adminRouter.post('/submissions/:id/retry', async (req, res) => {
-  const id = parse(idParam, req.params.id);
-  const s = await prisma.submission.findUnique({ where: { id }, include: { result: true } });
-  if (!s) throw new HttpError(404, 'NOT_FOUND', 'Submission not found.');
-  if (s.status !== 'FAILED') throw new HttpError(409, 'NOT_FAILED', 'Only FAILED submissions can be retried.');
   await prisma.$transaction(async (tx) => {
-    await tx.evaluationResult.deleteMany({ where: { submissionId: id } });
-    await tx.submission.update({ where: { id }, data: { status: 'QUEUED', startedAt: null, completedAt: null, enqueuedAt: null, queuedAt: new Date() } });
-    await audit(req.user!.id, 'SUBMISSION_RETRY', id, undefined, tx);
+    if (round1) {
+      await tx.benchmarkConfig.upsert({
+        where: { id: 1 },
+        update: {
+          round1Mae: round1.mae,
+          round1Rmse: round1.rmse,
+          round1Mse: round1.mse,
+          updatedBy: adminUser.displayName || adminUser.registrationId,
+        },
+        create: {
+          id: 1,
+          round1Mae: round1.mae,
+          round1Rmse: round1.rmse,
+          round1Mse: round1.mse,
+          updatedBy: adminUser.displayName || adminUser.registrationId,
+        },
+      });
+    }
+
+    if (variants) {
+      for (const v of variants) {
+        await tx.variant.update({
+          where: { id: v.id },
+          data: {
+            round3Mae: v.mae,
+            round3Rmse: v.rmse,
+            round3Mse: v.mse,
+          },
+        });
+      }
+    }
+
+    await audit(adminUser.id, 'BENCHMARKS_UPDATED', null, { round1, variants }, tx);
   });
-  await enqueueSubmission(id).catch(() => undefined); // recovery loop covers failures
-  ok(res, { id, status: 'QUEUED' });
+
+  ok(res, { success: true, message: 'Reference metrics updated successfully.' });
 });
 
-adminRouter.post('/submissions/:id/cancel', async (req, res) => {
-  const id = parse(idParam, req.params.id);
-  const r = await prisma.submission.updateMany({ where: { id, status: { in: ['QUEUED', 'RUNNING'] } }, data: { status: 'CANCELLED', completedAt: new Date() } });
-  if (r.count === 0) throw new HttpError(409, 'NOT_CANCELLABLE', 'Submission is not queued or running.');
-  await audit(req.user!.id, 'SUBMISSION_CANCEL', id);
-  ok(res, { id, status: 'CANCELLED' });
+// ---------- Competition / Round Timer Controls ----------
+adminRouter.get('/competition', async (_req, res) => {
+  ok(res, publicCompetition(await getCompetition()));
 });
-
-// ---------- competition ----------
-const startBody = z.object({ durationSeconds: z.number().int().min(60).max(86400).optional() }).strict();
 
 adminRouter.post('/competition/start', async (req, res) => {
-  const b = parse(startBody, req.body ?? {});
-  await startCompetition(b.durationSeconds);
-  await audit(req.user!.id, 'COMPETITION_START', null, b);
-  ok(res, publicCompetition(await getCompetition()));
-});
-adminRouter.post('/competition/pause', async (req, res) => { await pauseCompetition(); await audit(req.user!.id, 'COMPETITION_PAUSE'); ok(res, publicCompetition(await getCompetition())); });
-adminRouter.post('/competition/resume', async (req, res) => { await resumeCompetition(); await audit(req.user!.id, 'COMPETITION_RESUME'); ok(res, publicCompetition(await getCompetition())); });
-adminRouter.post('/competition/end', async (req, res) => { await endCompetition(); await audit(req.user!.id, 'COMPETITION_END'); ok(res, publicCompetition(await getCompetition())); });
-
-const configPatch = z.object({
-  durationSeconds: z.number().int().min(60).max(86400).optional(),
-  stage1Points: z.number().int().min(0).max(150).optional(),
-  anagramPoints: z.number().int().min(0).max(150).optional(),
-  stage2Points: z.number().int().min(0).max(150).optional(),
-  anagramPenalty: z.number().int().min(0).max(150).optional(),
-}).strict();
-
-adminRouter.patch('/competition/config', async (req, res) => {
-  const b = parse(configPatch, req.body);
-  const c = await getCompetition();
-  if (c.row.status === 'RUNNING' && (b.stage1Points !== undefined || b.anagramPoints !== undefined || b.stage2Points !== undefined || b.anagramPenalty !== undefined))
-    throw new HttpError(409, 'RUNNING', 'Point values cannot change while the competition is running.');
-  await prisma.competitionConfig.update({ where: { id: 1 }, data: b });
-  await audit(req.user!.id, 'COMPETITION_CONFIG', null, b);
+  const durationSeconds = req.body?.durationSeconds ? Number(req.body.durationSeconds) : undefined;
+  const force = Boolean(req.body?.force);
+  await startCompetition(durationSeconds, force);
+  await audit(req.user!.id, 'COMPETITION_START', undefined, { durationSeconds, force });
   ok(res, publicCompetition(await getCompetition()));
 });
 
-// ---------- reset (explicit confirmation) ----------
-adminRouter.post('/reset-scores', async (req, res) => {
-  const b = parse(z.object({ confirm: z.literal('RESET ALL SCORES') }).strict(), req.body);
-  void b;
-  const subs = await prisma.submission.findMany({ select: { artifactPath: true } });
-  await prisma.$transaction(async (tx) => {
-    await tx.stageCompletion.deleteMany();
-    await tx.anagramAttempt.deleteMany();
-    await tx.submission.deleteMany(); // cascades evaluation results
-    await tx.team.updateMany({ data: { scoreAdjustment: 0 } });
-    await tx.teamProgress.updateMany({ data: { stage1Points: 0, anagramPoints: 0, stage2Points: 0, incorrectAttempts: 0, stage1QualifiedAt: null, anagramSolvedAt: null, stage2QualifiedAt: null, totalScore: 0, lastScoreAt: null } });
-    await tx.competitionConfig.update({ where: { id: 1 }, data: { status: 'NOT_STARTED', startedAt: null, endsAt: null, remainingSeconds: null } });
-    await audit(req.user!.id, 'RESET_SCORES', null, { submissionsDeleted: subs.length }, tx);
+adminRouter.post('/competition/pause', async (req, res) => {
+  await pauseCompetition();
+  await audit(req.user!.id, 'COMPETITION_PAUSE');
+  ok(res, publicCompetition(await getCompetition()));
+});
+
+adminRouter.post('/competition/resume', async (req, res) => {
+  await resumeCompetition();
+  await audit(req.user!.id, 'COMPETITION_RESUME');
+  ok(res, publicCompetition(await getCompetition()));
+});
+
+adminRouter.post('/competition/end', async (req, res) => {
+  await endCompetition();
+  await audit(req.user!.id, 'COMPETITION_END');
+  ok(res, publicCompetition(await getCompetition()));
+});
+
+// ---------- CSV Export of Participants / Leaderboard ----------
+adminRouter.get('/export/csv', async (_req, res) => {
+  const participants = await prisma.user.findMany({
+    where: { role: 'PARTICIPANT' },
+    include: { variant: true },
+    orderBy: [
+      { totalScore: 'desc' },
+      { lastScoreAt: 'asc' },
+      { webId: 'asc' },
+    ],
   });
-  await Promise.all(subs.map((s) => safeUnlink(s.artifactPath)));
-  ok(res, { reset: true });
+
+  const escapeCsv = (val: any) => {
+    if (val === null || val === undefined) return '';
+    const str = String(val);
+    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const headers = [
+    'Rank',
+    'Web ID',
+    'Registration ID',
+    'Display Name',
+    'Assigned Model',
+    'Variant ID',
+    'Total Score',
+    'Round 1 Status',
+    'Round 1 Points',
+    'Round 1 Approved By',
+    'Round 1 Approved At',
+    'Round 2 Status',
+    'Round 2 Points',
+    'Round 2 Attempts',
+    'Round 2 Solved At',
+    'Round 3 Status',
+    'Round 3 Points',
+    'Round 3 Boilerplate Released',
+    'Round 3 Approved By',
+    'Round 3 Approved At',
+    'Last Score At',
+    'Registered At',
+  ];
+
+  const rows = participants.map((p, idx) => [
+    idx + 1,
+    `WEB-${String(p.webId).padStart(3, '0')}`,
+    p.registrationId,
+    p.displayName,
+    p.variant?.hiddenModel ?? 'None',
+    p.variantId ?? '',
+    p.totalScore,
+    p.round1Status,
+    p.round1Points,
+    p.round1ApprovedBy ?? '',
+    p.round1ApprovedAt ? p.round1ApprovedAt.toISOString() : '',
+    p.round2Status,
+    p.round2Points,
+    p.round2Attempts,
+    p.round2SolvedAt ? p.round2SolvedAt.toISOString() : '',
+    p.round3Status,
+    p.round3Points,
+    p.round3BoilerplateReleased ? 'YES' : 'NO',
+    p.round3ApprovedBy ?? '',
+    p.round3ApprovedAt ? p.round3ApprovedAt.toISOString() : '',
+    p.lastScoreAt ? p.lastScoreAt.toISOString() : '',
+    p.createdAt.toISOString(),
+  ]);
+
+  const csvContent = [
+    headers.join(','),
+    ...rows.map((row) => row.map(escapeCsv).join(',')),
+  ].join('\r\n');
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="sdc_mlc_participants_${new Date().toISOString().slice(0, 10)}.csv"`
+  );
+  res.status(200).send(csvContent);
 });
 
-adminRouter.get('/leaderboard', async (_req, res) => {
-  const board = await buildLeaderboard();
-  ok(res, board.map((b, i) => ({ rank: i + 1, teamId: b.teamId, name: b.name, totalScore: b.totalScore, lastScoreAt: b.lastScoreAt })));
-});
-
+// ---------- Audit Logs ----------
 adminRouter.get('/audit-logs', async (req, res) => {
-  const q = parse(z.object({ limit: z.coerce.number().int().min(1).max(500).default(100), action: z.string().max(60).optional() }), req.query);
-  ok(res, await prisma.auditLog.findMany({ where: { action: q.action }, orderBy: { createdAt: 'desc' }, take: q.limit }));
+  const limit = Math.min(200, Number.parseInt(req.query.limit as string, 10) || 50);
+  const logs = await prisma.auditLog.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+  ok(res, logs);
 });
-

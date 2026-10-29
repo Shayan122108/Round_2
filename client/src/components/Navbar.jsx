@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Clock, Shield, Terminal, Sparkles, LogOut, LogIn } from 'lucide-react';
+import { Trophy, Clock, Shield, Terminal, Sparkles, LogOut, LogIn, UserCheck } from 'lucide-react';
 
 export default function Navbar({
   activeTab,
@@ -11,7 +11,7 @@ export default function Navbar({
   onLogout
 }) {
   const formatTime = (secs) => {
-    if (secs === null || isNaN(secs)) return '90:00';
+    if (secs === null || isNaN(secs)) return '60:00';
     const m = Math.floor(Math.max(0, secs) / 60);
     const s = Math.max(0, secs) % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
@@ -32,25 +32,55 @@ export default function Navbar({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-lg tracking-tight font-[Outfit] text-white">
-                ML <span className="text-indigo-400">CHALLENGE</span>
+                SDC <span className="text-indigo-400">ML CHALLENGE</span>
               </span>
               <span className="badge badge-indigo text-[10px] tracking-wide uppercase py-0.5 px-2">
-                Round 2 Platform
+                3-Round Competition
               </span>
             </div>
-            <p className="text-xs text-[var(--text-dim)]">Precision Parts Sorting Line</p>
+            <p className="text-xs text-[var(--text-dim)]">Precision Machine Learning Competition</p>
           </div>
         </div>
 
-        {/* 90-Minute Timer Badge */}
+        {/* Round Timer Badge */}
         <div className="hidden md:flex items-center gap-4">
           <div className={`glass-card !py-1.5 !px-3.5 flex items-center gap-2.5 border ${
-            isLowTime ? 'border-rose-500/50 bg-rose-950/20 text-rose-300' : 'border-indigo-500/30 text-indigo-200'
+            competition?.status === 'PAUSED'
+              ? 'border-amber-500/50 bg-amber-950/25 text-amber-300'
+              : competition?.status === 'ENDED' || timeRemaining === 0
+              ? 'border-rose-500/50 bg-rose-950/25 text-rose-300'
+              : (!competition?.status || competition?.status === 'NOT_STARTED')
+              ? 'border-slate-700 bg-slate-900/40 text-slate-400'
+              : isLowTime
+              ? 'border-rose-500/50 bg-rose-950/20 text-rose-300'
+              : 'border-indigo-500/30 text-indigo-200'
           }`}>
-            <Clock className={`w-4 h-4 ${isLowTime ? 'text-rose-400 animate-spin' : 'text-indigo-400'}`} />
+            <Clock className={`w-4 h-4 ${
+              competition?.status === 'RUNNING'
+                ? isLowTime ? 'text-rose-400 animate-spin' : 'text-indigo-400 animate-pulse'
+                : competition?.status === 'PAUSED'
+                ? 'text-amber-400'
+                : 'text-slate-500'
+            }`} />
             <div>
-              <div className="text-[10px] uppercase font-bold tracking-wider text-[var(--text-dim)]">Time Remaining</div>
-              <div className={`font-mono font-bold text-base tracking-widest ${isLowTime ? 'text-rose-400' : 'text-white'}`}>
+              <div className="text-[10px] uppercase font-bold tracking-wider text-[var(--text-dim)] flex items-center gap-1.5">
+                <span>Time Remaining</span>
+                {competition?.status === 'PAUSED' && (
+                  <span className="badge badge-amber text-[9px] py-0 px-1 font-mono">PAUSED</span>
+                )}
+                {competition?.status === 'ENDED' && (
+                  <span className="badge badge-rose text-[9px] py-0 px-1 font-mono">ENDED</span>
+                )}
+              </div>
+              <div className={`font-mono font-bold text-base tracking-widest ${
+                competition?.status === 'PAUSED'
+                  ? 'text-amber-300'
+                  : competition?.status === 'ENDED'
+                  ? 'text-rose-400'
+                  : isLowTime
+                  ? 'text-rose-400'
+                  : 'text-white'
+              }`}>
                 {formatTime(timeRemaining)}
               </div>
             </div>
@@ -69,7 +99,7 @@ export default function Navbar({
               }`}
             >
               <Sparkles className="w-4 h-4" />
-              <span>Dashboard</span>
+              <span>Participant Dashboard</span>
             </button>
           )}
 
@@ -95,7 +125,7 @@ export default function Navbar({
               }`}
             >
               <Shield className="w-4 h-4 text-purple-400" />
-              <span>Admin Portal</span>
+              <span>Admin Panel</span>
             </button>
           )}
         </nav>
@@ -107,11 +137,16 @@ export default function Navbar({
               <div className="glass-card !py-1.5 !px-3 border-indigo-500/30 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 <div className="text-left">
-                  <div className="text-xs font-bold text-white leading-none">
-                    {authUser.displayName || authUser.registrationId}
+                  <div className="text-xs font-bold text-white leading-none flex items-center gap-1.5">
+                    {authUser.webId ? (
+                      <span className="badge badge-indigo text-[10px] py-0 px-1.5 font-mono">
+                        WEB-{String(authUser.webId).padStart(3, '0')}
+                      </span>
+                    ) : null}
+                    <span>{authUser.displayName || authUser.registrationId}</span>
                   </div>
-                  <div className="text-[10px] text-indigo-300 font-mono">
-                    {authUser.registrationId} [{authUser.role}]
+                  <div className="text-[10px] text-indigo-300 font-mono mt-0.5">
+                    {authUser.registrationId} • {authUser.role}
                   </div>
                 </div>
               </div>

@@ -13,7 +13,7 @@ export default function App() {
   const [csrfToken, setCsrfToken] = useState('');
   const [dashboardData, setDashboardData] = useState(null);
   const [competition, setCompetition] = useState(null);
-  const [timeRemaining, setTimeRemaining] = useState(90 * 60);
+  const [timeRemaining, setTimeRemaining] = useState(60 * 60);
 
   // Modals
   const [boilerplateOpen, setBoilerplateOpen] = useState(false);
@@ -63,8 +63,9 @@ export default function App() {
     checkAuth();
   }, []);
 
-  // Timer Tick
+  // Timer Tick - only counts down when competition is RUNNING
   useEffect(() => {
+    if (competition?.status !== 'RUNNING') return;
     const timer = setInterval(() => {
       setTimeRemaining((prev) => {
         if (prev <= 1) return 0;
@@ -73,6 +74,29 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(timer);
+  }, [competition?.status]);
+
+  // Periodic competition sync (keeps all clients aligned with admin controls)
+  useEffect(() => {
+    const syncComp = async () => {
+      try {
+        const res = await fetch('/api/competition');
+        if (res.ok) {
+          const body = await res.json();
+          if (body?.data) {
+            setCompetition(body.data);
+            if (body.data.remainingSeconds !== undefined) {
+              setTimeRemaining(body.data.remainingSeconds);
+            }
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    const interval = setInterval(syncComp, 8000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleLoginSuccess = (loginData) => {
@@ -114,7 +138,16 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-10 py-8">
-        {timeRemaining === 0 && (
+        {/* Banner if round paused */}
+        {competition?.status === 'PAUSED' && (
+          <div className="mb-6 p-4 rounded-xl bg-amber-950/50 border border-amber-500/50 text-amber-200 text-sm flex items-center justify-between">
+            <span className="font-bold">⏸️ Competition Round is Currently Paused by Administrators.</span>
+            <span className="badge badge-amber text-xs font-mono">Paused</span>
+          </div>
+        )}
+
+        {/* Banner if round ended or time zero */}
+        {(competition?.status === 'ENDED' || (timeRemaining === 0 && competition?.status === 'RUNNING')) && (
           <div className="mb-6 p-4 rounded-xl bg-rose-950/50 border border-rose-500/50 text-rose-200 text-sm flex items-center justify-between">
             <span className="font-bold">⏰ Competition Deadline Reached! Submissions are now closed.</span>
             <span className="badge badge-rose text-xs font-mono">Round Ended</span>
@@ -170,13 +203,13 @@ export default function App() {
       {/* Footer */}
       <footer className="border-t border-[var(--border-subtle)] bg-[#070b14] py-6 text-center text-xs text-[var(--text-dim)]">
         <div className="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-10 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div>ML Challenge Platform — 90-Minute Precision Machine Learning Competition</div>
+          <div>SDC ML Challenge — Precision Machine Learning Competition Platform</div>
           <div className="flex items-center gap-4 text-[11px]">
             <span>150 Maximum Score</span>
             <span>•</span>
-            <span>Docker-Isolated Scikit-Learn Evaluator</span>
+            <span>3 Competition Rounds</span>
             <span>•</span>
-            <span>Authoritative PostgreSQL & BullMQ</span>
+            <span>In-Person Manual Metric Verification</span>
           </div>
         </div>
       </footer>

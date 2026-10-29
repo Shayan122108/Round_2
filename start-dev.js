@@ -6,34 +6,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 console.log('----------------------------------------------------');
-console.log('🚀 Starting ML Challenge Platform (Full-Stack Dev) ...');
+console.log('🚀 Starting SDC ML Challenge Platform (Full-Stack Dev) ...');
 console.log('----------------------------------------------------');
 
 // Start Express Backend
 const server = spawn('npm', ['run', 'dev'], {
   cwd: path.join(__dirname, 'server'),
   stdio: 'inherit',
-  shell: true
-});
-
-// Start BullMQ Worker
-const worker = spawn('npm', ['run', 'worker'], {
-  cwd: path.join(__dirname, 'server'),
-  stdio: 'inherit',
-  shell: true
+  shell: true,
 });
 
 // Start Vite Frontend
 const client = spawn('npm', ['run', 'dev'], {
   cwd: path.join(__dirname, 'client'),
   stdio: 'inherit',
-  shell: true
+  shell: true,
 });
 
 function cleanup() {
-  console.log('\nStopping servers and worker...');
+  console.log('\nStopping servers...');
   server.kill();
-  worker.kill();
   client.kill();
   process.exit(0);
 }

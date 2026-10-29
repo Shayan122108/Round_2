@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, RefreshCw, Medal } from 'lucide-react';
+import { Trophy, RefreshCw, Medal, Sparkles } from 'lucide-react';
 
 export default function Leaderboard({ authUser }) {
   const [data, setData] = useState([]);
@@ -22,7 +22,7 @@ export default function Leaderboard({ authUser }) {
 
   useEffect(() => {
     fetchLeaderboard();
-    const interval = setInterval(fetchLeaderboard, 15000);
+    const interval = setInterval(fetchLeaderboard, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -38,7 +38,7 @@ export default function Leaderboard({ authUser }) {
               Official Live Leaderboard
             </h2>
             <p className="text-xs text-[var(--text-muted)]">
-              Rankings determined by authoritative database scores with time-based tie breaking
+              Rankings determined by authoritative database scores with time-based tie breaking (Max 150 pts)
             </p>
           </div>
         </div>
@@ -58,17 +58,18 @@ export default function Leaderboard({ authUser }) {
           <thead className="bg-slate-950/80 text-[var(--text-dim)] uppercase font-mono border-b border-slate-800">
             <tr>
               <th className="py-3 px-4">Rank</th>
-              <th className="py-3 px-4">Participant / Team</th>
-              <th className="py-3 px-4 text-center">Stage 1</th>
-              <th className="py-3 px-4 text-center">Anagram</th>
-              <th className="py-3 px-4 text-center">Stage 2</th>
+              <th className="py-3 px-4">Web ID</th>
+              <th className="py-3 px-4">Participant</th>
+              <th className="py-3 px-4 text-center">Round 1 (30 pts)</th>
+              <th className="py-3 px-4 text-center">Round 2 (50 pts)</th>
+              <th className="py-3 px-4 text-center">Round 3 (70 pts)</th>
               <th className="py-3 px-4 text-right">Total Score</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60 font-mono">
             {data.length === 0 ? (
               <tr>
-                <td colSpan="6" className="py-8 text-center text-slate-500">
+                <td colSpan="7" className="py-8 text-center text-slate-500">
                   {loading ? 'Loading rankings...' : 'No participant scores recorded yet.'}
                 </td>
               </tr>
@@ -95,6 +96,9 @@ export default function Leaderboard({ authUser }) {
                       <span className="text-slate-400">#{item.rank}</span>
                     )}
                   </td>
+                  <td className="py-3.5 px-4 font-bold text-indigo-300">
+                    {item.webId || `WEB-${String(item.numericWebId).padStart(3, '0')}`}
+                  </td>
                   <td className="py-3.5 px-4 font-sans font-semibold text-white">
                     {item.name}
                   </td>
@@ -119,7 +123,7 @@ export default function Leaderboard({ authUser }) {
                       <span className="text-slate-600">—</span>
                     )}
                   </td>
-                  <td className="py-3.5 px-4 text-right font-bold text-sm text-indigo-400">
+                  <td className="py-3.5 px-4 text-right font-bold text-sm text-amber-400">
                     {item.totalScore} / 150
                   </td>
                 </tr>

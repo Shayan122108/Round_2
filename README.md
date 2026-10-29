@@ -1,141 +1,161 @@
-# ML Challenge Platform — Round 2 Production Implementation
+# SDC ML Challenge Platform — Complete Official Website Implementation
 
-Complete, secure, multi-stage machine learning competition platform.
+A secure, multi-stage machine learning competition platform designed for offline metric verification, real-time leaderboard tracking, participant identity management, and invigilator administration.
 
 ---
 
-## 1. Architecture Overview
+## 1. Architecture & Design Principles
 
 ```
-React 19 Frontend (Vite + Tailwind CSS v4)
-         │  (Secure session cookie + CSRF token + Origin validation)
+React 19 Frontend (Vite + Tailwind CSS)
+         │  (HttpOnly Session Cookies + CSRF Protection + Rate Limiting)
          ▼
-Express API Backend (Node.js 22 LTS, Zod validation, Helmet, Rate Limiter)
+Express API Backend (Node.js 22 LTS, Zod Validation, Helmet)
          │
-         ├──► PostgreSQL 16 (Authoritative State, Foreign Keys, Row-Level Locks)
-         │       • Participants, Teams, Variants (private metadata)
-         │       • Submissions (durable records before enqueueing)
-         │       • Stage Completions (unique constraints preventing double awards)
-         │       • Atomic Anagram Penalties (30-point deduction, score clamped 0..150)
+         ├──► PostgreSQL 16 (Authoritative Database)
+         │       • Participants with database-generated sequential web_id
+         │       • Atomic score capping (0..150 points)
+         │       • 4k Model Variant assignments & private ground truth metrics
+         │       • Review decisions, approvals, and immutable audit history
          │
-         ├──► Redis 7 & BullMQ
-         │       • Asynchronous evaluation queue with bounded concurrency
-         │       • Automated recovery loop for unqueued/stale evaluations
-         │
-         └──► Isolated Python 3.11 Evaluation Worker
-                 • Docker sandbox (`mlc-sandbox:1`) with `--network none`, non-root user (65534:65534), read-only mounts, memory (1GB) and CPU limits
-                 • Untrusted `.joblib` pipelines evaluated ONLY against test features
-                 • Private reference labels & answer keys NEVER mounted in the container
-                 • Trusted scoring service computes authoritative metrics (Accuracy, Macro F1)
+         └──► Protected Dataset & Boilerplate Storage
+                 • train.csv, test.csv, linear_regression_boilerplate.py
+                 • Variant-specific small_test.csv for Round 2 decoding
+                 • Variant-specific Round 3 boilerplate (locked until admin release)
 ```
 
----
-
-## 2. Competition Rules & Stages
-
-1. **Stage 1 — Logistic Regression Challenge**:
-   - Participants download `train.csv` (1,600 precision parts) and helper script `challenge_features.py`.
-   - Participants train a `scikit-learn` `LogisticRegression` pipeline and upload `model.joblib`.
-   - Worker evaluates against private test features; meeting the 75% accuracy threshold awards **30 points** (once).
-2. **Anagram Challenge**:
-   - Unlocked only after qualifying Stage 1.
-   - Shows scrambled letters (`variant_map.csv`) and allows preview/download of personalized `clue_dataset.csv`.
-   - Each incorrect attempt deducts an atomic **30-point penalty**. Total score is clamped to **0–150**.
-   - Correct answer awards **50 points** and unlocks Stage 2 dataset & starter boilerplate.
-3. **Stage 2 — Secret Variant ML Benchmark**:
-   - Accessible only after solving the anagram.
-   - Participants train their unlocked algorithm (`RandomForestClassifier`, `DecisionTreeClassifier`, `GaussianNB`, or `HistGradientBoostingClassifier`) on `stage2_train.csv`.
-   - Qualifying awards **70 points** (once). Maximum total score: **150 points**.
+### Key Workflow Highlights
+- **No Model Uploads / No Worker Containers**: Participants train models locally in VS Code, Jupyter, or Google Colab.
+- **In-Person Verification**: Invigilators check locally computed metrics (MAE, RMSE, MSE) against reference benchmarks displayed in the admin panel and record approvals/rejections with a single click.
+- **Point Structure (Max 150 pts)**:
+  - **Round 1 (Linear Regression)**: 30 Points (Manual metric verification)
+  - **Round 2 (Decode the Model)**: 50 Points (Automatic answer verification, unlimited attempts, no penalty)
+  - **Round 3 (Assigned ML Model)**: 70 Points (Manual metric verification, boilerplate locked until admin release)
 
 ---
 
-## 3. Local Development & Deployment (Windows & Docker)
+## 2. Competition Rounds & Rules
+
+| Round | Challenge | Points | Verification Mode |
+|---|---|---:|---|
+| **Round 1** | **Linear Regression** | **30** | **Manual Metric Verification**: Participant trains locally on `train.csv`, calculates MAE, RMSE, and MSE. Invigilator compares against Round 1 reference values and approves via admin panel. |
+| **Round 2** | **Decode the Model** | **50** | **Automatic Verification**: Predict on `small_test.csv`, convert predictions to ASCII characters, and solve the anagram. Verified case-insensitively on backend. Unlimited attempts without penalties. |
+| **Round 3** | **Assigned ML Model Challenge** | **70** | **Manual Metric Verification**: "Now prove your model." Unlocked after Round 2, but boilerplate download is locked until an authorized admin explicitly releases it. Participant trains their assigned model (Random Forest, Decision Tree, Naive Bayes, or Gradient Boosting), calculates MAE, RMSE, and MSE, and shows them to an invigilator for final approval. |
+
+---
+
+## 3. Participant Authentication & 4k Variant Mapping
+
+- **Registration Format**: `SDC-2026-XXX` (e.g. `SDC-2026-001`).
+- **Sequential `web_id`**: Generated automatically by a PostgreSQL sequence (`@default(autoincrement())`). Safe under concurrency and row deletions (never uses `count + 1`).
+- **Persistent State**: First login automatically registers the participant; returning participants retain their identical `web_id`, score, progress, and assigned model.
+- **4k Variant Mapping Rule**:
+  $$\text{variantId} = ((\text{web\_id} - 1) \pmod 4) + 1$$
+  - $\text{web\_id} \equiv 1 \pmod 4 \implies$ **Variant 1: Random Forest Classifier**
+  - $\text{web\_id} \equiv 2 \pmod 4 \implies$ **Variant 2: Decision Tree Classifier**
+  - $\text{web\_id} \equiv 3 \pmod 4 \implies$ **Variant 3: Naive Bayes (GaussianNB)**
+  - $\text{web\_id} \equiv 0 \pmod 4 \implies$ **Variant 4: Gradient Boosting Classifier**
+- **Strict Privacy**: Internal variant IDs, mapping rules, and admin reference benchmarks are never sent to participant browsers. In Round 3, participants only see their assigned model name.
+
+---
+
+## 4. Admin Dashboard & Verification Workflow
+
+1. **Round & Competition Control Center**:
+   - Authorized admins can **Start Round**, **Pause Round**, **Resume Round**, and **End Round** with configurable duration (e.g. 60m, 45m, 30m, or custom).
+   - Pausing freezes the remaining timer and temporarily halts verification requests; resuming restores submissions.
+2. **Export Leaderboard & Participant Data (CSV)**:
+   - One-click **Export CSV** button in the header and participant roster to export the complete leaderboard, rank, model assignments, round-by-round points, and verification timestamps.
+3. **Pending Verifications Queue**:
+   - High-priority table displaying participants awaiting manual metric verification.
+   - Shows Web ID, Registration ID, round awaiting review, current score, and a "Review Candidate" action.
+4. **Participant Detail Modal**:
+   - Shows candidate Web ID, Registration ID, score, round-by-round status, and assigned model variant.
+   - Displays authorized reference metrics for Round 1 and Round 3 (Admin Only).
+   - Review controls: **Approve (+30 / +70 pts)**, **Reject**, with optional rejection reason and confirmation modal.
+   - **Release Boilerplate Control**: Allows admin to release the Round 3 boilerplate once Round 2 is solved.
+5. **Benchmark Management**:
+   - Admin view & edit of Round 1 benchmarks (MAE, RMSE, MSE) and Round 3 variant benchmarks. Changes are recorded in audit logs.
+6. **Audit Trail**:
+   - Full history of admin actions, timestamps, actor identity, points awarded, and decisions.
+
+---
+
+## 5. Prerequisites & Local Setup
 
 ### Prerequisites
-- Node.js 22 LTS
-- Python 3.11 (with `scikit-learn==1.6.1`, `pandas`, `numpy`, `joblib`)
-- Docker Desktop (with WSL2 backend enabled)
+- **Node.js**: v22 LTS or newer
+- **Docker**: Docker Desktop with PostgreSQL 16 container
+- **Python**: 3.10+ (for local participant modeling)
 
 ### Step 1: Environment Configuration
-Copy `.env.example` to `.env`:
-```powershell
-cp .env.example .env
-```
-
-Ensure `.env` contains:
+Ensure `.env` in the project root contains:
 ```ini
 NODE_ENV=development
+POSTGRES_USER=mlc
+POSTGRES_PASSWORD=change-me
+POSTGRES_DB=mlchallenge
 POSTGRES_PORT=55432
-DATABASE_URL=postgresql://mlc:mlc_dev_password@127.0.0.1:55432/mlchallenge?schema=public
-REDIS_PORT=56379
-REDIS_URL=redis://127.0.0.1:56379
-SESSION_SECRET=replace-with-long-random-string-at-least-32-chars
+DATABASE_URL=postgresql://mlc:change-me@127.0.0.1:55432/mlchallenge?schema=public
+
 PORT=5000
-ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5000,http://localhost:3000
-SANDBOX_MODE=docker
-SANDBOX_IMAGE=mlc-sandbox:1
-ALLOW_COMPROMISED_EVAL_DATA=1
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5000,http://127.0.0.1:5173,http://127.0.0.1:5000
+SESSION_SECRET=super-secret-key-at-least-32-chars-long-for-security
+COOKIE_SECURE=false
+
+ADMIN_REGISTRATION_ID=ADMIN
+ADMIN_PIN=AdminSecure123!
 ```
 
-### Step 2: Start Infrastructure (PostgreSQL & Redis)
+### Step 2: Start PostgreSQL Database
 ```powershell
-docker compose up -d --wait
+docker compose up -d
 ```
 
-### Step 3: Build the Python Evaluation Sandbox Image
-```powershell
-docker build -t mlc-sandbox:1 ./sandbox
-```
-
-### Step 4: Import & Verify Competition Datasets
-```powershell
-python scripts/import_datasets.py
-```
-*Note: Evaluates train/test schemas, checks 26 ASCII classes (65-90), verifies anagram multisets, and imports datasets to private server storage.*
-
-### Step 5: Database Setup & Seed
+### Step 3: Initialize Database Schema & Seed Data
 ```powershell
 cd server
-node --env-file=.env node_modules\prisma\build\index.js db push
-node --env-file=.env --import tsx prisma/seed.ts
+$env:DATABASE_URL="postgresql://mlc:change-me@127.0.0.1:55432/mlchallenge?schema=public"
+.\node_modules\.bin\prisma.cmd db push
+node --env-file=../.env --import tsx prisma/seed.ts
 ```
 
-### Step 6: Start Server, Worker & Frontend
-In separate terminals:
-- **API Server**:
+### Step 4: Run Application
+To start both backend and frontend together:
+```powershell
+node start-dev.js
+```
+Or in separate terminals:
+- **Backend API**:
   ```powershell
   cd server
   npm run dev
   ```
-- **BullMQ Python Worker**:
-  ```powershell
-  cd server
-  npm run worker
-  ```
-- **React Frontend**:
+- **Frontend Client**:
   ```powershell
   cd client
   npm run dev
   ```
 
----
-
-## 4. Default Seed Accounts
-
-- **Participant Teams**:
-  - `REG-101` / PIN: `1234` (Neural Knights — Variant 1: Random Forest)
-  - `REG-102` / PIN: `1234` (Gradient Gurus — Variant 2: Decision Tree)
-  - `REG-103` / PIN: `1234` (Vector Voyagers — Variant 3: Naive Bayes)
-  - `REG-104` / PIN: `1234` (Tensor Titans — Variant 4: Gradient Boosting)
-  - `REG-105` / PIN: `1234` (Deep Divers — Variant 1)
-- **Administrator**:
-  - `ADMIN` / PIN: `AdminSecure123!` (or the PIN configured in your `.env`)
+Frontend will be available at `http://localhost:5173`, API server at `http://localhost:5000`.
 
 ---
 
-## 5. Security & Isolation Controls
+## 6. Default Credentials
 
-1. **Pickle / Joblib Execution Isolation**: Untrusted `.joblib` models run inside unprivileged Docker containers (`--network none`, `--cap-drop ALL`, `--read-only`, non-root user `65534`). Ground-truth labels and answer keys are never placed in the container.
-2. **Authoritative Scores**: Evaluator metrics and scores are computed exclusively in trusted Node.js code wrapped in PostgreSQL transactions with `SELECT ... FOR UPDATE` row locks.
-3. **Defense Against Answer Key Leaks**: Ground-truth answer keys from public repository history are tagged in `dataset_manifest.json`. Organizers can provide fresh holdouts via `python scripts/import_datasets.py --private-dir <dir>` prior to a live competition.
-4. **Cookie Authentication & Anti-CSRF**: Session tokens are encrypted in secure `httpOnly` cookies with `SameSite=Strict`. Mutating endpoints require `X-CSRF-Token` validation matching the session.
+- **Admin Account**:
+  - Registration ID: `ADMIN`
+  - Secret PIN: `AdminSecure123!` (or value configured in `.env`)
+- **Participant Accounts**:
+  - `SDC-2026-001` through `SDC-2026-005` (or enter any `SDC-2026-XXX` ID on first login)
+
+---
+
+## 7. Running Tests
+
+Run the complete test suite:
+```powershell
+cd server
+npm test
+```
+Runs 31 automated integration and unit tests covering authentication, participant persistence, 4k variant assignment, locked stages, answer checking, manual approvals, boilerplate release, benchmark privacy, and the live leaderboard.

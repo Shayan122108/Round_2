@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Upload, CheckCircle2, AlertCircle, ArrowRight, RefreshCw, FileCode } from 'lucide-react';
+import { Download, CheckCircle2, AlertCircle, Clock, FileCode, ArrowRight, UserCheck, RefreshCw } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function Stage1Card({
@@ -7,82 +7,52 @@ export default function Stage1Card({
   csrfToken,
   onRefreshTeam
 }) {
-  const [file, setFile] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState(null);
+  const [requesting, setRequesting] = useState(false);
+  const [msg, setMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [submissionId, setSubmissionId] = useState(null);
 
-  const stage1Qualified = dashboardData?.stages?.stage1?.completed;
+  const stage1 = dashboardData?.stages?.stage1;
+  const status = stage1?.status || 'IN_PROGRESS';
+  const isApproved = stage1?.completed;
+  const isPending = status === 'PENDING_VERIFICATION';
+  const isRejected = status === 'REJECTED';
 
-  const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-      setErrorMsg('');
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!file) {
-      setErrorMsg('Please select a trained scikit-learn .joblib pipeline file.');
-      return;
-    }
-
-    setIsSubmitting(true);
+  const handleRequestVerification = async () => {
+    setRequesting(true);
+    setMsg('');
     setErrorMsg('');
-    setResult(null);
-
-    const formData = new FormData();
-    formData.append('file', file);
 
     try {
-      const res = await fetch('/api/submissions/stage1', {
+      const res = await fetch('/api/rounds/request-verification', {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'X-CSRF-Token': csrfToken,
         },
-        body: formData
+        body: JSON.stringify({ round: 1 }),
       });
-      const data = await res.json();
 
+      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error?.message || 'Submission failed.');
+        throw new Error(data.error?.message || 'Failed to request verification.');
       }
 
-      setSubmissionId(data.data.submissionId);
-      pollResult(data.data.submissionId);
+      setMsg('Verification requested! Please call an invigilator to show your locally calculated metrics.');
+      onRefreshTeam();
     } catch (err) {
       setErrorMsg(err.message);
-      setIsSubmitting(false);
-    }
-  };
-
-  const pollResult = async (subId) => {
-    try {
-      const res = await fetch(`/api/submissions/${subId}`);
-      if (res.ok) {
-        const data = await res.json();
-        const sub = data.data;
-        if (sub.status === 'COMPLETED' || sub.status === 'FAILED') {
-          setResult(sub.result);
-          setIsSubmitting(false);
-          if (sub.result?.qualified) {
-            confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-          }
-          onRefreshTeam();
-          return;
-        }
-      }
-      setTimeout(() => pollResult(subId), 2000);
-    } catch (err) {
-      setTimeout(() => pollResult(subId), 3000);
+    } finally {
+      setRequesting(false);
     }
   };
 
   return (
     <div className={`glass-panel p-6 sm:p-8 transition-all ${
-      stage1Qualified ? 'border-emerald-500/40' : 'border-indigo-500/20'
+      isApproved
+        ? 'border-emerald-500/40 bg-emerald-950/10'
+        : isPending
+        ? 'border-amber-500/40 bg-amber-950/10'
+        : 'border-indigo-500/20'
     }`}>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -92,11 +62,19 @@ export default function Stage1Card({
               01
             </span>
             <h2 className="text-xl sm:text-2xl font-bold font-[Outfit] text-white">
-              Stage 1 — Logistic Regression Pipeline (.joblib)
+              Round 1 — Linear Regression
             </h2>
-            {stage1Qualified ? (
+            {isApproved ? (
               <span className="badge badge-emerald">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Qualified (+30 pts)
+                <CheckCircle2 className="w-3.5 h-3.5" /> Approved (+30 pts)
+              </span>
+            ) : isPending ? (
+              <span className="badge badge-amber">
+                <Clock className="w-3.5 h-3.5 animate-spin" /> Pending In-Person Verification
+              </span>
+            ) : isRejected ? (
+              <span className="badge badge-rose">
+                <AlertCircle className="w-3.5 h-3.5" /> Needs Revision
               </span>
             ) : (
               <span className="badge badge-indigo">
@@ -105,27 +83,41 @@ export default function Stage1Card({
             )}
           </div>
           <p className="text-sm text-[var(--text-muted)] mt-1.5 max-w-2xl">
-            Train a scikit-learn <strong>LogisticRegression</strong> Pipeline on the training parts (target <code>sort_bin</code> ASCII 65-90). Upload your exported <code>.joblib</code> artifact for sandbox evaluation.
+            Train a <strong>Linear Regression</strong> model locally using VS Code, Jupyter Notebook, or Google Colab. Evaluate your model using <strong>MAE</strong>, <strong>RMSE</strong>, and <strong>MSE</strong>.
           </p>
         </div>
 
         {/* Status Pill */}
         <div className="text-right">
           <div className="text-xs uppercase font-semibold text-[var(--text-dim)]">Status</div>
-          <div className={`text-base font-bold ${stage1Qualified ? 'text-emerald-400' : 'text-amber-400'}`}>
-            {stage1Qualified ? 'Stage 1 Completed' : 'Awaiting Qualification'}
+          <div className={`text-base font-bold ${
+            isApproved
+              ? 'text-emerald-400'
+              : isPending
+              ? 'text-amber-400'
+              : isRejected
+              ? 'text-rose-400'
+              : 'text-indigo-400'
+          }`}>
+            {isApproved
+              ? 'Approved (+30 pts)'
+              : isPending
+              ? 'Awaiting Invigilator Review'
+              : isRejected
+              ? 'Rejected — Revise & Retest'
+              : 'In Progress'}
           </div>
         </div>
       </div>
 
-      {/* Dataset & Helper Download Section */}
-      <div className="mb-6 bg-slate-900/60 rounded-xl p-4 border border-[var(--border-subtle)]">
+      {/* Downloads Section */}
+      <div className="mb-6 bg-slate-900/60 rounded-xl p-4 sm:p-5 border border-[var(--border-subtle)]">
         <div className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-3">
-          Step 1: Download Permitted Datasets & Feature Engineering Helper
+          Step 1: Download Challenge Datasets & Starter Boilerplate
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <a
-            href="/api/datasets/stage1/train"
+            href="/api/datasets/round1/train"
             download="train.csv"
             className="btn btn-secondary !py-2.5 !px-3 text-xs flex items-center justify-between group"
           >
@@ -133,129 +125,130 @@ export default function Stage1Card({
               <Download className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
               <span>train.csv</span>
             </div>
-            <span className="text-[10px] text-[var(--text-dim)] font-mono">1,600 rows (18 features + sort_bin)</span>
+            <span className="text-[10px] text-[var(--text-dim)] font-mono">1,600 rows</span>
           </a>
 
           <a
-            href="/api/datasets/challenge-features"
-            download="challenge_features.py"
+            href="/api/datasets/round1/test"
+            download="test.csv"
+            className="btn btn-secondary !py-2.5 !px-3 text-xs flex items-center justify-between group"
+          >
+            <div className="flex items-center gap-2">
+              <Download className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+              <span>test.csv</span>
+            </div>
+            <span className="text-[10px] text-[var(--text-dim)] font-mono">Holdout Set</span>
+          </a>
+
+          <a
+            href="/api/datasets/round1/boilerplate"
+            download="linear_regression_boilerplate.py"
             className="btn btn-secondary !py-2.5 !px-3 text-xs flex items-center justify-between group border-indigo-500/30"
           >
             <div className="flex items-center gap-2">
-              <FileCode className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
-              <span>challenge_features.py</span>
+              <FileCode className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+              <span>Starter Boilerplate</span>
             </div>
-            <span className="text-[10px] text-cyan-400 font-mono">Pre-installed Sandbox Module</span>
+            <span className="text-[10px] text-emerald-400 font-mono">Python Template</span>
           </a>
         </div>
       </div>
 
-      {/* Submission Form */}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-            Step 2: Submit Trained Logistic Regression Model (.joblib)
-          </label>
-          <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500/60 rounded-xl p-6 text-center bg-slate-950/40 transition-all flex flex-col items-center justify-center relative cursor-pointer group">
-            <input
-              type="file"
-              accept=".joblib"
-              onChange={handleFileChange}
-              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-            />
-            <Upload className="w-8 h-8 text-indigo-400 mb-2 group-hover:scale-110 transition-transform" />
-            <p className="text-sm font-semibold text-white">
-              {file ? file.name : 'Choose or drop trained model.joblib'}
-            </p>
-            <p className="text-xs text-[var(--text-dim)] mt-1">
-              File must be a scikit-learn Pipeline created with <span className="font-mono text-indigo-300">joblib.dump(pipeline, "model.joblib")</span>
-            </p>
-          </div>
+      {/* Instructions & Offline Verification Flow */}
+      <div className="p-4 sm:p-5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3 mb-6">
+        <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+          Step 2: Train Locally & Show Metrics In Person
         </div>
-
-        {errorMsg && (
-          <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
-
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-          <div className="text-xs text-[var(--text-dim)]">
-            Asynchronously evaluated in an isolated Docker container against private test features.
-          </div>
-
-          <button
-            type="submit"
-            disabled={isSubmitting || !file}
-            className="btn btn-primary"
-          >
-            {isSubmitting ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Evaluating in Sandbox Queue...</span>
-              </>
-            ) : (
-              <>
-                <span>Submit .joblib Model</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
+        <div className="text-xs text-[var(--text-muted)] space-y-1.5 leading-relaxed">
+          <p>• Participants train and evaluate their model <strong>locally on their own machine</strong>.</p>
+          <p>• Calculate your evaluation metrics: <strong>Mean Absolute Error (MAE)</strong>, <strong>Root Mean Squared Error (RMSE)</strong>, and <strong>Mean Squared Error (MSE)</strong>.</p>
+          <p>• Once ready, call an invigilator to your desk and show your locally calculated metrics for manual verification.</p>
+          <p>• The invigilator will compare your metrics against authorized admin reference values and approve or reject your submission directly in the admin panel.</p>
         </div>
-      </form>
+      </div>
 
-      {/* Evaluation Results Banner */}
-      {result && (
-        <div className={`mt-6 rounded-xl p-5 border transition-all ${
-          result.qualified
-            ? 'bg-emerald-950/20 border-emerald-500/40'
-            : 'bg-amber-950/20 border-amber-500/40'
-        }`}>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              {result.qualified ? (
-                <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/40">
-                  <CheckCircle2 className="w-6 h-6" />
-                </div>
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/40">
-                  <AlertCircle className="w-6 h-6" />
-                </div>
-              )}
-              <div>
-                <h4 className="font-bold text-base text-white">
-                  {result.qualified ? 'Stage 1 Qualified!' : 'Evaluation Threshold Not Met'}
-                </h4>
-                <p className="text-xs text-[var(--text-muted)]">
-                  {result.qualified
-                    ? 'Congratulations! You qualified Stage 1. 30 milestone points awarded.'
-                    : result.message || `Accuracy of ${(result.accuracy * 100).toFixed(1)}% is below the required 75% threshold.`}
-                </p>
-              </div>
-            </div>
-
-            {result.accuracy !== null && (
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <div className="text-[10px] uppercase text-[var(--text-dim)] font-semibold">Test Accuracy</div>
-                  <div className="font-mono font-bold text-lg text-white">
-                    {(result.accuracy * 100).toFixed(1)}%
-                  </div>
-                </div>
-                {result.durationMs && (
-                  <div className="text-right">
-                    <div className="text-[10px] uppercase text-[var(--text-dim)] font-semibold">Duration</div>
-                    <div className="font-mono font-bold text-sm text-cyan-400">
-                      {result.durationMs}ms
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+      {/* Feedback & Notifications */}
+      {isRejected && (
+        <div className="p-4 rounded-xl bg-rose-950/30 border border-rose-500/40 text-xs text-rose-200 mb-6 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <div className="font-bold text-rose-300">Attempt Needs Adjustment:</div>
+            <p className="mt-0.5">
+              {stage1?.rejectionReason || 'Your locally calculated metrics did not meet the reference thresholds.'}
+            </p>
+            <p className="mt-1 text-[11px] text-rose-300/80">
+              Refine your hyperparameters, re-calculate MAE, RMSE, and MSE, and call an invigilator when ready for re-verification.
+            </p>
           </div>
         </div>
       )}
+
+      {msg && (
+        <div className="p-3 mb-4 rounded-lg bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+          <span>{msg}</span>
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="p-3 mb-4 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {/* Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+        <div className="text-xs text-[var(--text-dim)]">
+          {isApproved ? (
+            <span className="text-emerald-400 font-medium">
+              ✓ Round 1 Approved! 30 points awarded. Proceed to Round 2 below.
+            </span>
+          ) : isPending ? (
+            <span className="text-amber-300 font-medium flex items-center gap-1.5">
+              <Clock className="w-4 h-4 animate-spin text-amber-400" />
+              Your request is active. An invigilator will review your laptop screen shortly.
+            </span>
+          ) : (
+            <span>No uploads required. All verification takes place offline with an invigilator.</span>
+          )}
+        </div>
+
+        {!isApproved && (
+          <button
+            type="button"
+            onClick={handleRequestVerification}
+            disabled={requesting || isPending}
+            className={`btn text-xs !py-2.5 !px-5 flex items-center gap-2 ${
+              isPending
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-not-allowed'
+                : 'btn-primary'
+            }`}
+          >
+            {requesting ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Requesting...</span>
+              </>
+            ) : isPending ? (
+              <>
+                <Clock className="w-4 h-4" />
+                <span>Awaiting Invigilator Review</span>
+              </>
+            ) : isRejected ? (
+              <>
+                <UserCheck className="w-4 h-4" />
+                <span>Call Invigilator for Re-Verification</span>
+              </>
+            ) : (
+              <>
+                <UserCheck className="w-4 h-4" />
+                <span>Call Invigilator / Request Verification</span>
+              </>
+            )}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

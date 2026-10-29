@@ -58,16 +58,16 @@ describe('End-to-End Competition Workflow Tests', () => {
       .send({ answer: 'RANDOM FOREST' });
 
     expect(res.status).toBe(403);
-    expect(res.body.error?.code).toBe('STAGE1_REQUIRED');
+    expect(res.body.error?.code).toBe('ROUND1_REQUIRED');
   });
 
-  it('rejects Stage 2 dataset download before solving anagram', async () => {
+  it('rejects Round 3 boilerplate download before solving anagram', async () => {
     const res = await request(app)
-      .get('/api/datasets/stage2/train')
+      .get('/api/datasets/round3/boilerplate')
       .set('Cookie', participantCookie);
 
     expect(res.status).toBe(403);
-    expect(res.body.error?.code).toBe('ANAGRAM_REQUIRED');
+    expect(res.body.error?.code).toBe('ROUND2_REQUIRED');
   });
 });
 

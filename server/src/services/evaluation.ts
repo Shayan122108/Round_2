@@ -49,8 +49,8 @@ export async function evaluateSubmission(submissionId: string): Promise<void> {
   const stage1 = sub.stage === 1;
   const evalKey = stage1 ? `variant_${v.id}` : 'stage2';
   const rule = stage1
-    ? { estimator: 'LogisticRegression', minAccuracy: v.stage1MinAccuracy }
-    : { estimator: v.estimator, minAccuracy: v.stage2MinAccuracy, minF1: v.stage2MinMacroF1 };
+    ? { estimator: 'LogisticRegression', minAccuracy: 0.75 }
+    : { estimator: v.estimator, minAccuracy: 0.75, minF1: 0.70 };
 
   const t0 = Date.now();
   let outcome: EvalOutcome;

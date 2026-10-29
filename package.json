@@ -1,6 +1,7 @@
 {
   "name": "ml-challenge-platform",
   "version": "1.0.0",
+  "type": "module",
   "description": "Multi-Stage ML Competition Platform",
   "scripts": {
     "start": "node start-dev.js",

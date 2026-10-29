@@ -47,10 +47,10 @@ export async function assertOpen(db: Db = prisma) {
   throw new HttpError(403, `COMPETITION_${c.row.status}`, msg);
 }
 
-export async function startCompetition(durationSeconds?: number) {
+export async function startCompetition(durationSeconds?: number, force = false) {
   return prisma.$transaction(async (tx) => {
     const c = await getCompetition(tx);
-    if (c.row.status === 'RUNNING' || c.row.status === 'PAUSED')
+    if (!force && (c.row.status === 'RUNNING' || c.row.status === 'PAUSED'))
       throw new HttpError(409, 'ALREADY_STARTED', 'Competition already in progress.');
     const dur = durationSeconds ?? c.row.durationSeconds;
     const now = new Date();
@@ -84,4 +84,3 @@ export async function endCompetition() {
     return tx.competitionConfig.update({ where: { id: 1 }, data: { status: 'ENDED', endsAt: null, remainingSeconds: 0 } });
   });
 }
-
