@@ -212,6 +212,8 @@ model EvaluationResult {
   rowsScored   Int?
   durationMs   Int?
   errorCode    String?
+  /// Organizer-only holdout evaluation metrics (tested against test_for_admin.csv). Never exposed to participants.
+  adminMetrics Json?
   createdAt    DateTime @default(now())
 
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)

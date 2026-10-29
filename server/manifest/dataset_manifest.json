@@ -158,5 +158,13 @@
         "visibility": "legacy-csv-only"
       }
     }
+  },
+  "adminHoldout": {
+    "file": "private/admin_eval/test_for_admin.csv",
+    "featuresFile": "private/admin_eval/features.csv",
+    "labelsFile": "private/admin_eval/labels.csv",
+    "rows": 400,
+    "sha256": "74601edc65dbedda2c9c316e5827fa1691eae2d8b68922bd7a0461faccf8bb08",
+    "visibility": "private-admin-only"
   }
 }

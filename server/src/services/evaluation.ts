@@ -6,6 +6,7 @@ import { InfraError, runInSandbox, type SandboxResult } from './sandbox.js';
 import { computeMetrics, parseLabelsCsv } from './metrics.js';
 import { paths } from './storage.js';
 import { awardForSubmission } from './scoring.js';
+import { runAdminEvaluator } from './adminEvaluator.js';
 
 export interface EvalOutcome {
   errorCode: string | null;
@@ -23,7 +24,10 @@ export function scorePredictions(
   rule: { estimator: string; minAccuracy: number; minF1?: number },
 ): EvalOutcome {
   if (!sb.ok) return { errorCode: sb.errorCode, qualified: false };
-  if (sb.estimator !== rule.estimator) return { errorCode: 'WRONG_ESTIMATOR', qualified: false };
+  const estimatorMatches = sb.estimator === rule.estimator ||
+    (rule.estimator === 'HistGradientBoostingClassifier' && sb.estimator === 'GradientBoostingClassifier') ||
+    (rule.estimator === 'GradientBoostingClassifier' && sb.estimator === 'HistGradientBoostingClassifier');
+  if (!estimatorMatches) return { errorCode: 'WRONG_ESTIMATOR', qualified: false };
   if (sb.predictions.length !== labels.length) return { errorCode: 'BAD_PREDICTION_SHAPE', qualified: false };
   if (sb.predictions.some((p) => p < LABEL_MIN || p > LABEL_MAX)) return { errorCode: 'INVALID_LABELS', qualified: false };
   const m = computeMetrics(labels, sb.predictions);
@@ -71,6 +75,24 @@ export async function evaluateSubmission(submissionId: string): Promise<void> {
 
   const durationMs = Date.now() - t0;
   const failed = outcome.errorCode !== null;
+
+  // Run organizer holdout evaluator (test_for_admin.csv) in background for admin review
+  let adminMetrics = null;
+  if (!failed) {
+    try {
+      const adminEval = await runAdminEvaluator(sub.artifactPath, 60_000);
+      if (adminEval.status === 'success') {
+        adminMetrics = adminEval;
+        logger.info({ submissionId, adminMetrics }, 'admin holdout evaluation succeeded');
+      } else {
+        adminMetrics = { error_code: adminEval.error_code, message: adminEval.message };
+        logger.warn({ submissionId, err: adminEval.error_code }, 'admin holdout evaluation returned error');
+      }
+    } catch (e) {
+      logger.warn({ err: String(e), submissionId }, 'admin holdout evaluation failed to run');
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     const cur = await tx.submission.findUniqueOrThrow({ where: { id: submissionId } });
     if (cur.status !== 'RUNNING') return; // cancelled meanwhile
@@ -78,6 +100,7 @@ export async function evaluateSubmission(submissionId: string): Promise<void> {
     const data = {
       accuracy: m?.accuracy ?? null, precision: m?.precision ?? null, recall: m?.recall ?? null, f1: m?.f1 ?? null,
       qualified: !failed && outcome.qualified, rowsScored: outcome.rowsScored ?? null, durationMs, errorCode: outcome.errorCode,
+      adminMetrics: adminMetrics as any,
     };
     await tx.evaluationResult.upsert({ where: { submissionId }, create: { submissionId, ...data }, update: data });
     await tx.submission.update({ where: { id: submissionId }, data: { status: failed ? 'FAILED' : 'COMPLETED', completedAt: new Date() } });
